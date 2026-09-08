@@ -109,6 +109,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="do not write files for components with no code",
     )
     p_ex.add_argument(
+        "--extract-shared",
+        action="store_true",
+        help="also export shared-library components, overwriting them in the "
+        "shared folder instead of pushing the repo copy into the target",
+    )
+    p_ex.add_argument(
         "--dry-run", action="store_true", help="report without writing files"
     )
     p_ex.set_defaults(func=commands.cmd_extract)

@@ -34,6 +34,9 @@ class TargetSession:
     target: TargetConfig
     path: Path
     src_dir: Path
+    #: Every folder injected into this target: shared includes first, then the
+    #: target's own folder (which is also ``src_dir``).
+    source_dirs: list[Path]
     app: Any
     workbook: Any
     project: Any
@@ -127,6 +130,7 @@ def open_target(
             target=target,
             path=path,
             src_dir=config.target_dir(target),
+            source_dirs=config.source_dirs(target),
             app=app,
             workbook=workbook,
             project=project,

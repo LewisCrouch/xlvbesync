@@ -55,6 +55,11 @@ class TargetConfig:
     #: Skip these component names entirely (exact match, case-insensitive).
     exclude: list[str] = field(default_factory=list)
 
+    #: Extra source folders under ``src_dir`` whose modules are injected into
+    #: this target (e.g. a shared library). Opt-in; the target's own folder
+    #: is always implicit.
+    include: list[str] = field(default_factory=list)
+
     def resolved_name(self) -> str:
         return self.name or Path(self.path).stem
 
@@ -72,6 +77,17 @@ class TargetConfig:
                 f"Target {self.path!r} has invalid mode {self.mode!r}.",
                 f"Valid modes: {', '.join(VALID_MODES)}",
             )
+        for entry in self.include:
+            # Includes must stay inside src_dir; anything anchored or with ".."
+            # would silently pull code from elsewhere on disk. Testing the
+            # anchor rather than is_absolute() also catches root-relative
+            # forms like "/etc", which Windows does not call absolute.
+            rel = Path(entry)
+            if not entry or rel.anchor or ".." in rel.parts:
+                raise ConfigError(
+                    f"Target {self.path!r} has invalid include {entry!r}.",
+                    "Include entries must be relative folder names under src_dir.",
+                )
 
 
 @dataclass
@@ -105,6 +121,37 @@ class ProjectConfig:
         p = Path(target.path)
         return p.resolve() if p.is_absolute() else (self.root / p).resolve()
 
+    def shared_dir(self, name: str) -> Path:
+        """Resolve an include folder, refusing anything outside ``src_dir``."""
+        resolved = (self.src_root / name).resolve()
+        root = self.src_root
+        if resolved != root and root not in resolved.parents:
+            raise ConfigError(
+                f"Include {name!r} resolves outside src_dir.",
+                "Include entries must name folders under src_dir.",
+            )
+        return resolved
+
+    def source_dirs(self, target: TargetConfig) -> list[Path]:
+        """Folders whose modules are injected into ``target``.
+
+        Shared (include) folders come first, the target's own folder last, so
+        a same-named file in the target folder wins the injection order.
+        """
+        dirs = [self.shared_dir(name) for name in target.include]
+        dirs.append(self.target_dir(target))
+        return dirs
+
+    def is_shared_source(self, path: Path) -> bool:
+        """True if ``path`` sits in a src_dir folder no target owns."""
+        try:
+            rel = path.resolve().relative_to(self.src_root)
+        except ValueError:
+            return False
+        if not rel.parts:
+            return False
+        return self.find_target(rel.parts[0]) is None
+
     # -- lookup -----------------------------------------------------------
 
     def find_target(self, key: str) -> TargetConfig | None:
@@ -120,14 +167,36 @@ class ProjectConfig:
         return None
 
     def target_for_source(self, path: Path) -> TargetConfig | None:
-        """Which target owns the source file at ``path``?"""
+        """Which target should handle the source file at ``path``?
+
+        A file in a target's own folder belongs to that target. A file in any
+        other src_dir folder is shared: the first target whose ``include``
+        names that folder claims it. The watcher re-resolves per target via
+        :meth:`targets_for_source`, so this first-match only gates events.
+        """
+        targets = self.targets_for_source(path)
+        return targets[0] if targets else None
+
+    def targets_for_source(self, path: Path) -> list[TargetConfig]:
+        """All targets whose source folders contain ``path``."""
         try:
             rel = path.resolve().relative_to(self.src_root)
         except ValueError:
-            return None
+            return []
         if not rel.parts:
-            return None
-        return self.find_target(rel.parts[0])
+            return []
+        folder = rel.parts[0].casefold()
+        out: list[TargetConfig] = []
+        for t in self.targets:
+            owns = t.resolved_name().casefold() == folder
+            includes = any(
+                Path(name).parts[0].casefold() == folder
+                for name in t.include
+                if Path(name).parts
+            )
+            if owns or includes:
+                out.append(t)
+        return out
 
     # -- (de)serialisation -------------------------------------------------
 

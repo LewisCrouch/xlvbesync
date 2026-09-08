@@ -54,8 +54,8 @@ you type - including add-ins, which Excel normally keeps locked.
 ## Install
 
 ```powershell
-git clone https://github.com/LewisCrouch/XLScripts.git
-cd XLScripts
+git clone https://github.com/LewisCrouch/xlvba.git
+cd xlvba
 
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
@@ -252,7 +252,12 @@ python -m xlvba extract --dry-run -v
 |---|---|
 | `--prune` | Delete local files whose component no longer exists in Excel |
 | `--skip-empty` | Do not write files for components with no code |
+| `--extract-shared` | Export shared-library modules too, back into their shared folder |
 | `--dry-run` | Report without writing anything |
+
+With no `--extract-shared`, shared-library modules are skipped and the repo's
+copy is injected into the target instead. See
+[Sharing a library between targets](#sharing-a-library-between-targets).
 
 ### `inject`
 
@@ -311,6 +316,7 @@ file              type             lines  local  notes
 ----------------  ---------------  -----  -----  ---------------
 modDemo.bas       standard module  11     yes
 CDemo.cls         class module     12     yes
+modCommon.bas     standard module  24     yes    shared: shared
 frmDemo.frm       userform         6      yes
 Sheet1.dcm        document module  5      yes    Sheet: Data
 ThisWorkbook.dcm  document module  5      yes    ThisWorkbook
@@ -349,7 +355,8 @@ Created by `init`, searched for upwards from the current directory. See
       "name": "Reporting",
       "mode": "live",
       "save_after_inject": true,
-      "exclude": ["Sheet1"]
+      "exclude": ["Sheet1"],
+      "include": ["shared"]
     }
   ]
 }
@@ -373,9 +380,79 @@ Per target:
 | `mode` | `"live"` | `live` or `swap` |
 | `save_after_inject` | `true` | Save so the disk file matches the loaded project |
 | `exclude` | `[]` | Component names never extracted or injected |
+| `include` | `[]` | Extra folders under `src_dir` to inject (see below) |
 
 `sync_deletions` is off by default deliberately: an accidental file deletion
 should not silently destroy working code in your workbook.
+
+### Sharing a library between targets
+
+`include` lists folders under `src_dir` whose modules are injected into the
+target alongside its own. Keep the shared code in one folder and opt each
+target in:
+
+```json
+{
+  "src_dir": "src",
+  "targets": [
+    { "path": "workbooks/Reporting.xlsm", "name": "Reporting", "include": ["shared"] },
+    { "path": "addins/MyTools.xlam", "name": "MyTools", "include": ["shared"] }
+  ]
+}
+```
+
+```
+src/
+├─ shared/            one copy in the repo
+│  └─ modCommon.bas
+├─ Reporting/
+└─ MyTools/
+```
+
+Both `Reporting.xlsm` and `MyTools.xlam` receive `modCommon`. Under `watch`,
+saving `src/shared/modCommon.bas` hot-reloads every target that includes it.
+
+Details worth knowing:
+
+- It is opt-in. A target with no `include` behaves exactly as before, and a
+  folder no target includes is ignored.
+- Entries must be relative folder names under `src_dir`; absolute paths and
+  `..` are rejected so a config cannot pull code from anywhere on disk.
+- If the same filename exists in both a shared folder and the target's own
+  folder, the target's own copy wins - a local override.
+- `exclude` still matches by component name, so it can drop a shared module
+  from one target.
+- `xlvba list` marks shared modules with `shared: <folder>` in its notes
+  column.
+
+#### The repo's shared copy is authoritative
+
+Extract is asymmetric on purpose. Extracting a shared module into the target's
+own folder would silently create a local override and quietly fork the library,
+so `extract` does the opposite:
+
+```powershell
+python -m xlvba extract --target Reporting
+```
+
+- Shared components are **not** written to `src/Reporting/`. They are reported
+  as `shared modCommon.bas (kept shared/modCommon.bas)`.
+- Instead the repo's `src/shared/` files are **injected into the target**,
+  overwriting whatever Excel had. Extracting is therefore also how you bring a
+  target back in line with the library, including the first time a target opts
+  in and does not have the modules yet.
+- Everything in the target's own folder extracts exactly as before.
+
+When Excel really does hold the newer version - you edited the module in the
+VBE - ask for it explicitly:
+
+```powershell
+python -m xlvba extract --target Reporting --extract-shared
+```
+
+That writes each shared component back over its file **in the shared folder it
+came from** (never a copy in the target folder), and skips the push-back. The
+edit then propagates to every other target on the next inject or save.
 
 ### Ad-hoc use without a config
 
@@ -394,6 +471,8 @@ your-project/
 ├─ xlvba.json
 ├─ .xlvba-state.json        generated; safe to delete
 └─ src/
+   ├─ shared/               shared library (opt-in via "include")
+   │  └─ modCommon.bas
    ├─ Reporting/
    │  ├─ modUtil.bas        standard module
    │  ├─ CThing.cls         class module
@@ -573,12 +652,16 @@ Source layout:
 | `xlvba/cli.py` | Argument parsing |
 | `xlvba/commands.py` | One handler per subcommand |
 | `xlvba/watch.py` | Debounced watcher + single-flight COM worker |
+| `xlvba/ops/session.py` | Target session context manager and workbook binding |
+| `xlvba/ops/extract.py` | Export components to disk (with shared library handling) |
+| `xlvba/ops/inject.py` | Source discovery and component injection |
+| `xlvba/ops/reload.py` | Live / swap reload orchestration |
 | `xlvba/core/excel.py` | COM attach, ROT enumeration, prompt suppression |
 | `xlvba/core/addin.py` | `.xlam` lifecycle, lock probing, atomic replace |
 | `xlvba/core/vbproject.py` | Enumerate and export components |
 | `xlvba/core/mutate.py` | Import, replace, create, remove (with rollback) |
 | `xlvba/core/codec.py` | UTF-8 <-> ANSI bridge, VBE header parsing |
-| `xlvba/core/config.py` | `xlvba.json` |
+| `xlvba/core/config.py` | `xlvba.json` loading, target resolution, and validation |
 | `xlvba/core/state.py` | Content-hash cache |
 | `xlvba/core/errors.py` | HRESULT decoding, actionable exceptions |
 

@@ -13,6 +13,7 @@ from xlvba.core.components import (
     is_source_file,
 )
 from xlvba.core.errors import XlvbaError
+from xlvba.core.excel import same_path
 from xlvba.core.mutate import InjectionResult, inject_component, remove_component
 from xlvba.core.state import SyncState, hash_file, hash_text
 from xlvba.core.vbproject import list_components
@@ -46,24 +47,66 @@ class InjectReport:
         return not self.failures
 
 
-def discover_sources(session: TargetSession) -> list[Path]:
-    """All managed source files in the target's folder, sorted.
+#: Injection order by extension. Standard modules and classes go in before
+#: userforms, and document modules last: a form's code may reference helpers,
+#: and importing in dependency-friendly order avoids spurious compile errors
+#: mid-sync.
+_INJECT_ORDER = {".bas": 0, ".cls": 1, ".frm": 2, ".dsr": 3, ".dcm": 4}
 
-    Standard modules and classes are injected before userforms, and document
-    modules last: a form's code may reference helpers, and importing in
-    dependency-friendly order avoids spurious compile errors mid-sync.
-    """
-    if not session.src_dir.is_dir():
+
+def sort_sources(files: list[Path]) -> list[Path]:
+    """Order source files for injection. Stable, so callers keep their ties."""
+    return sorted(
+        files, key=lambda p: (_INJECT_ORDER.get(p.suffix.lower(), 9), p.stem.casefold())
+    )
+
+
+def _scan(session: TargetSession, folder: Path) -> list[Path]:
+    """Managed source files directly under ``folder`` (recursively)."""
+    if not folder.is_dir():
         return []
-
-    order = {".bas": 0, ".cls": 1, ".frm": 2, ".dsr": 3, ".dcm": 4}
-    files = [
+    return [
         p
-        for p in session.src_dir.rglob("*")
+        for p in folder.rglob("*")
         if p.is_file() and is_source_file(p) and not _ignored(session, p)
     ]
-    files.sort(key=lambda p: (order.get(p.suffix.lower(), 9), p.stem.casefold()))
-    return files
+
+
+def discover_sources(session: TargetSession) -> list[Path]:
+    """All managed source files for the target, sorted.
+
+    Scans every folder in ``session.source_dirs``: shared includes first, then
+    the target's own folder, so a same-named file in the own folder is
+    injected last and wins.
+    """
+    files: list[Path] = []
+    for folder in session.source_dirs:
+        files.extend(_scan(session, folder))
+    return sort_sources(files)
+
+
+def shared_sources(session: TargetSession) -> dict[str, Path]:
+    """Source files this target gets from shared includes, keyed by filename.
+
+    A file in the target's own folder shadows a shared file of the same name,
+    so overridden names are deliberately absent: that component belongs to the
+    target, not to the shared library.
+    """
+    if not session.target.include:
+        return {}
+
+    own = {p.name.casefold() for p in _scan(session, session.src_dir)}
+    out: dict[str, Path] = {}
+
+    for folder in session.source_dirs:
+        if same_path(folder, session.src_dir):
+            continue
+        for path in _scan(session, folder):
+            key = path.name.casefold()
+            if key not in own:
+                out[key] = path
+
+    return out
 
 
 def _ignored(session: TargetSession, path: Path) -> bool:
@@ -147,7 +190,7 @@ def inject_target(
     :func:`xlvba.core.mutate.inject_component`.
     """
     report = InjectReport(target=session.name)
-    files = only if only is not None else discover_sources(session)
+    files = sort_sources(only) if only is not None else discover_sources(session)
 
     excluded = {e.casefold() for e in session.exclude}
 
@@ -199,9 +242,25 @@ def _remove_orphans(
             continue
         out.append(remove_component(session.project, info.name))
         if state is not None:
-            state.forget(session.name, Path(session.name) / info.ref.filename)
+            _forget_component(session, state, info.ref.filename)
 
     return out
+
+
+def _forget_component(
+    session: TargetSession, state: SyncState, filename: str
+) -> None:
+    """Drop cached hashes for a removed component, wherever it lived.
+
+    A component can come from the target's own folder or any shared include,
+    so we cannot reconstruct the state key from the target name alone. Leaving
+    a stale hash behind would make a later re-add look "unchanged" and skip
+    the injection entirely.
+    """
+    needle = f"/{filename.casefold()}"
+    for key in state.tracked(session.name):
+        if key == filename.casefold() or key.endswith(needle):
+            state.forget(session.name, key)
 
 
 def remove_source(

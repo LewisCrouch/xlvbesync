@@ -18,14 +18,16 @@
       "name": "Reporting",
       "mode": "live",
       "save_after_inject": true,
-      "exclude": []
+      "exclude": [],
+      "include": ["shared"]
     },
     {
       "path": "C:/Users/you/AppData/Roaming/Microsoft/AddIns/MyTools.xlam",
       "name": "MyTools",
       "mode": "live",
       "save_after_inject": true,
-      "exclude": ["Sheet1"]
+      "exclude": ["Sheet1"],
+      "include": ["shared"]
     }
   ]
 }

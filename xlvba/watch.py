@@ -184,16 +184,16 @@ class SyncWorker:
         by_target: dict[str, tuple[TargetConfig, list[Path], list[Path]]] = {}
 
         for path, kind in batch.items():
-            target = self.config.target_for_source(path)
-            if target is None:
-                continue
-            key = target.resolved_name()
-            entry = by_target.setdefault(key, (target, [], []))
-            # Re-check existence: a rename can leave a stale DELETE queued.
-            if kind == DELETE and not path.exists():
-                entry[2].append(path)
-            elif path.exists():
-                entry[1].append(path)
+            # A file in a shared include folder belongs to every target that
+            # includes it, so one save fans out to all of them.
+            for target in self.config.targets_for_source(path):
+                key = target.resolved_name()
+                entry = by_target.setdefault(key, (target, [], []))
+                # Re-check existence: a rename can leave a stale DELETE queued.
+                if kind == DELETE and not path.exists():
+                    entry[2].append(path)
+                elif path.exists():
+                    entry[1].append(path)
 
         for key, (target, changed, deleted) in by_target.items():
             try:
@@ -273,8 +273,9 @@ def watch(
 
     console.info(f"watching {src_root}")
     for target in selected:
+        shared = f" + {', '.join(target.include)}" if target.include else ""
         console.detail(
-            f"{target.resolved_name()} -> {config.target_path(target).name} "
+            f"{target.resolved_name()}{shared} -> {config.target_path(target).name} "
             f"[{mode or target.mode}]"
         )
 
@@ -283,9 +284,10 @@ def watch(
 
     if initial_sync:
         for target in selected:
-            for path in sorted(config.target_dir(target).rglob("*")):
-                if path.is_file() and is_source_file(path):
-                    worker.inbox.put(PendingChange(path.resolve(), CHANGE))
+            for folder in config.source_dirs(target):
+                for path in sorted(folder.rglob("*")):
+                    if path.is_file() and is_source_file(path):
+                        worker.inbox.put(PendingChange(path.resolve(), CHANGE))
 
     console.info("ready (press Ctrl+C to stop)")
 

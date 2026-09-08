@@ -65,6 +65,17 @@ def _looks_like_path(value: str) -> bool:
     return p.is_absolute() or len(p.parts) > 1 or p.exists()
 
 
+def _origin_label(cfg: ProjectConfig, path: Path) -> str:
+    """Note naming the shared folder a source file came from, else empty."""
+    if not cfg.is_shared_source(path):
+        return ""
+    try:
+        folder = path.parent.resolve().relative_to(cfg.src_root).as_posix()
+    except ValueError:
+        return "shared"
+    return f"shared: {folder}"
+
+
 def _selected(args: argparse.Namespace, cfg: ProjectConfig) -> list[TargetConfig]:
     raw = getattr(args, "target", None)
     if raw and _looks_like_path(raw):
@@ -110,11 +121,14 @@ def cmd_extract(args: argparse.Namespace) -> int:
                 prune=args.prune,
                 include_empty=not args.skip_empty,
                 dry_run=args.dry_run,
+                extract_shared=args.extract_shared,
             )
         print_extract(report, verbose=args.verbose)
         if report.skipped and any(
             not reason.startswith("empty") for _, reason in report.skipped
         ):
+            failed = True
+        if report.pushed is not None and not report.pushed.ok:
             failed = True
 
     if not args.dry_run:
@@ -216,26 +230,36 @@ def cmd_list(args: argparse.Namespace) -> int:
             components = list_components(session.project, exclude=session.exclude)
             doc_names = document_module_map(session.workbook)
             # Keep original casing for display, casefolded keys for matching.
-            local_files = {p.name.casefold(): p.name for p in discover_sources(session)}
+            # Shared includes are discovered before the target's own folder, so
+            # an own-folder file of the same name overwrites the shared entry -
+            # exactly the precedence the injector uses.
+            local_files: dict[str, str] = {}
+            origin: dict[str, str] = {}
+            for path in discover_sources(session):
+                key = path.name.casefold()
+                local_files[key] = path.name
+                origin[key] = _origin_label(cfg, path)
             local = set(local_files)
 
             rows: list[tuple[str, ...]] = []
             for info in components:
-                note = doc_names.get(info.name, "")
+                key = info.ref.filename.casefold()
+                notes = [doc_names.get(info.name, ""), origin.get(key, "")]
                 rows.append(
                     (
                         info.ref.filename,
                         info.ref.label,
                         str(info.line_count),
-                        "yes" if info.ref.filename.casefold() in local else "no",
-                        note,
+                        "yes" if key in local else "no",
+                        ", ".join(n for n in notes if n),
                     )
                 )
 
             excel_names = {c.ref.filename.casefold() for c in components}
             for key in sorted(local - excel_names):
+                notes = [n for n in ("will be created", origin[key]) if n]
                 rows.append(
-                    (local_files[key], "local only", "-", "yes", "will be created")
+                    (local_files[key], "local only", "-", "yes", ", ".join(notes))
                 )
 
         console.info(

@@ -28,4 +28,4 @@ dependencies = [
 xlvba = "xlvba.cli:main"
 
 [tool.setuptools]
-packages = ["xlvba", "xlvba.core"]
+packages = ["xlvba", "xlvba.core", "xlvba.ops"]
