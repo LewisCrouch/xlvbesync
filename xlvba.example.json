@@ -1,0 +1,31 @@
+{
+  "src_dir": "src",
+  "ansi_encoding": "cp1252",
+  "debounce_ms": 250,
+  "launch_excel": false,
+  "sync_deletions": false,
+  "ignore": [
+    ".git/**",
+    ".venv/**",
+    "__pycache__/**",
+    "**/*.frx",
+    "**/~$*",
+    "**/*.tmp"
+  ],
+  "targets": [
+    {
+      "path": "workbooks/Reporting.xlsm",
+      "name": "Reporting",
+      "mode": "live",
+      "save_after_inject": true,
+      "exclude": []
+    },
+    {
+      "path": "C:/Users/you/AppData/Roaming/Microsoft/AddIns/MyTools.xlam",
+      "name": "MyTools",
+      "mode": "live",
+      "save_after_inject": true,
+      "exclude": ["Sheet1"]
+    }
+  ]
+}

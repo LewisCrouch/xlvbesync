@@ -1,0 +1,34 @@
+# Default: let Git normalise text in the repo and check out native endings.
+* text=auto
+
+# ---- VBA source ----
+# The VBE is CRLF-native. Force CRLF on checkout so a file round-tripped
+# through Git is byte-identical to what Excel produced, and keep the working
+# copy stable regardless of the user's core.autocrlf setting.
+*.bas text eol=crlf working-tree-encoding=UTF-8
+*.cls text eol=crlf working-tree-encoding=UTF-8
+*.frm text eol=crlf working-tree-encoding=UTF-8
+*.dcm text eol=crlf working-tree-encoding=UTF-8
+
+# Userform binary resources: layout and embedded images. Not diffable.
+*.frx binary
+
+# ---- Excel binaries ----
+*.xlsm binary
+*.xlam binary
+*.xlsb binary
+*.xls binary
+*.xlsx binary
+
+# ---- Repo files ----
+*.py text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.toml text eol=lf
+*.txt text eol=lf
+.gitattributes text eol=lf
+.gitignore text eol=lf
+.cursorrules text eol=lf
+
+# Keep GitHub's language stats focused on the tool itself.
+*.frx linguist-generated=true

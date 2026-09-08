@@ -1,0 +1,192 @@
+# Cursor rules for xlvba (Excel VBA tooling over win32com)
+
+This project automates Excel through COM to extract, inject and hot-reload VBA
+in `.xlsm` workbooks and `.xlam` add-ins. It is Windows-only by nature.
+
+The rules below are not style preferences. Most of them encode a specific bug
+that was hit and fixed while building this tool. Breaking one reintroduces a
+real failure.
+
+## Architecture: where code belongs
+
+- `xlvba/core/` is the only layer allowed to talk to COM.
+- `xlvba/ops/` composes core operations into user-level actions.
+- `xlvba/commands.py` + `cli.py` do argument handling and printing only.
+- Never call `win32com.client` directly from `ops/` or `commands.py`. Add a
+  helper to `core/excel.py` instead.
+- Never `print()`. Use `xlvba.core.console` (`info`/`warn`/`error`/`detail`),
+  which sanitises output for legacy consoles. A bare `print` of a non-cp1252
+  character raises `UnicodeEncodeError` *inside print* and aborts a sync.
+
+## win32com usage
+
+### Attaching to Excel
+
+- Use `get_excel_for(path)`, not `GetActiveObject` directly. Excel can run
+  several processes; `GetActiveObject` returns an arbitrary one. Injecting into
+  the wrong instance reports success while the user's session keeps running old
+  code. `get_excel_for` prefers the instance that already hosts the file.
+- Use `all_excel_instances()` (Running Object Table enumeration) whenever an
+  operation must affect *every* instance, such as unlocking a file.
+- `DispatchEx` creates a new process; only use it to deliberately start one.
+
+### COM apartments and threads
+
+- Any thread that touches COM must be inside `with com_apartment():`. The
+  watchdog worker thread does this. Forgetting it produces
+  `CoInitialize has not been called`.
+- Keep all Excel calls on a single thread. Excel is an STA server; concurrent
+  calls yield `Call was rejected by callee` or corrupt state. The watcher funnels
+  every change through one worker via a queue.
+
+### Iterating COM collections
+
+- Iterate by index (`for i in range(1, coll.Count + 1): coll.Item(i)`), never
+  with a Python `for` over the collection. Adding or removing a component
+  invalidates the enumerator mid-loop.
+- **Loaded add-ins are invisible to `Workbooks` iteration and absent from
+  `Workbooks.Count`, but `Workbooks("Name.xlam")` resolves them.** Always use
+  `lookup_workbook()` / `find_workbook()` which try both. A by-index scan alone
+  will wrongly conclude an installed add-in is closed.
+- Wrap per-item access in `try/except` and `continue`; a workbook can close
+  underneath you.
+
+### Excel state must always be restored
+
+- Wrap any mutation in `with quiet_excel(app):`. It saves and restores
+  `DisplayAlerts`, `ScreenUpdating`, `EnableEvents` and `AskToUpdateLinks` in a
+  `finally`. Never set these directly - leaving `EnableEvents = False` breaks
+  the user's Excel until they restart it.
+- `EnableEvents = False` during injection is required, or `Workbook_BeforeSave`
+  and friends fire mid-sync.
+
+## Handling COM exceptions
+
+- Never catch bare `Exception` and swallow it silently at an operation boundary.
+  Decode it: `hresult_of(exc)` and `com_description(exc)` in `core/errors.py`.
+- `pywintypes.com_error.args` is
+  `(hresult, description, excepinfo, argerror)`. When the outer HRESULT is
+  `DISP_E_EXCEPTION` (`-2147352567`) the real error is the *scode* at
+  `excepinfo[5]`. `hresult_of()` already unwraps this; use it.
+- Retry only transient errors, via `@com_retry()` from `core/retry.py`:
+  - `-2147418111` `RPC_E_CALL_REJECTED` (Excel busy)
+  - `-2147417846` `RPC_E_SERVERCALL_RETRYLATER`
+  Retrying an access-denied or bad-argument error just wastes time.
+- Raise a typed error from `core/errors.py` with a concrete `remedy` string.
+  Every user-visible failure should say what to do next:
+  - `VBOMAccessDeniedError` - Trust Center setting off
+  - `ProjectProtectedError` - VBA project locked for viewing
+  - `FileLockedError` - Excel still holds the file
+  - `TargetNotFoundError` / `TargetNotOpenError`
+  - `VbeBusyError` - code running or break mode
+- Distinguish "trust denied" from "project password protected". The HRESULTs
+  overlap but the fixes are unrelated; `get_vbproject()` separates them.
+
+## `.xlam` file locks - the fragile part
+
+When changing an add-in file on disk, follow this order exactly:
+
+1. Inject into a **staged copy**, never the live add-in. Injecting into the
+   live one and then swapping makes the subsequent save overwrite the change.
+2. Name the staging file so the real extension is **last**:
+   `Name.xlvba-stage.xlam`. Excel refuses to open a file whose extension it
+   does not recognise.
+3. Uninstall from **every** Excel instance (`unload_addin` does this). An
+   add-in loaded in another process keeps the file locked regardless.
+4. Poll until the handle actually drops (`wait_for_unlock`). `Installed = False`
+   returns *before* Excel has released the file. Never use a fixed `sleep`.
+5. Replace with `os.replace` (atomic) after copying to a sibling temp file.
+   Keep a `.xlvba-bak` rollback copy.
+6. Reinstall in each instance that had it (`reload_hosts`), inside a `finally`
+   so a mid-swap exception cannot leave the user without their add-in.
+
+Additional traps:
+
+- **`AddIn.Installed` reads `True` from the registry even when the add-in is not
+  actually loaded** - this is the normal state of an automation-launched Excel,
+  which skips add-ins at startup. Assigning `True` again is a silent no-op. To
+  force a genuine load you must toggle `False` then `True`
+  (`force_install()` handles this).
+- Verify load state with `is_loaded()` (name lookup), never with `Installed`.
+- Probe locks with `is_file_locked()` (opens `r+b`); do not shell out to
+  `handle.exe` or guess.
+- Clean up `~$Name.xlam` owner files and mention them in error messages.
+- **Never touch add-ins outside the project's configured targets.** The user's
+  own installed add-ins are off limits.
+
+## UTF-8 vs the VBE's ANSI code page
+
+This is a hard requirement; do not shortcut it.
+
+- **Every file xlvba reads or writes on disk is UTF-8, no BOM, CRLF endings.**
+- `VBComponent.Export` writes the host ANSI code page (cp1252 on Western
+  installs) and `VBComponents.Import` expects the same. So:
+  - export: `Export` to a temp file, decode ANSI, rewrite as UTF-8
+  - inject: read UTF-8, encode to ANSI into a temp file, then `Import`
+- Always go through `core/codec.py`: `read_text`, `write_text`, `decode_ansi`,
+  `encode_ansi`. Never call `open()` on a VBA source file without an explicit
+  `encoding`, and never rely on the platform default.
+- `read_text` uses `utf-8-sig` and falls back to the ANSI code page, so a raw
+  VBE export dropped in by hand still works.
+- Report lossy characters rather than silently writing `?`. `encode_ansi`
+  returns the list; surface it as a warning naming the line and codepoint.
+- Hash with `hash_text()`, which normalises line endings first. The VBE always
+  returns CRLF; without normalising, every file looks permanently dirty.
+- When printing a character that failed to encode, print its codepoint
+  (`U+1F600`), not the character.
+
+## VBComponent operations
+
+- Type constants: `1` standard module, `2` class module, `3` userform,
+  `100` document module. Use `core/components.py`, not literals.
+- `.bas`/`.cls`/`.frm` are replaced by **remove-then-import**, because `Import`
+  always adds and would rename to `Module1_1`. Snapshot the old code first and
+  restore it if the import fails - a rejected import must not be destructive.
+- **Document modules (`100`) cannot be removed, imported or created.** Update
+  them in place with `CodeModule.DeleteLines` + `AddFromString`, and strip the
+  `Attribute VB_Name` header first or you get a compile error.
+- Match document modules by sheet **CodeName**, never by tab name, which the
+  user can rename freely.
+- Userforms need the binary `.frx` beside the `.frm` at import time, or the form
+  loses all its controls. Copy it into the staging directory too.
+- Force `Attribute VB_Name` to agree with the filename on inject
+  (`ensure_vb_name`); the filename is authoritative.
+- Validate names with `validate_vba_name()` before calling COM. VBA allows
+  letters/digits/underscore, must start with a letter, max 31 characters.
+  Skipping this yields a uselessly generic COM error.
+- Inject in dependency-friendly order: `.bas`, `.cls`, `.frm`, then `.dcm`.
+
+## Watcher rules
+
+- Debounce (default 250 ms). One Ctrl+S emits several events.
+- Skip unchanged content by hash. Do not re-inject identical bytes; it
+  needlessly resets the VBA project.
+- Ignore `~$*`, `*.tmp` and `*~`; a `.frx` change must resync its `.frm`.
+- Treat a move onto a real filename as a save (atomic-save pattern).
+- Never let an exception kill the watcher thread. Catch per target, log, carry
+  on.
+- Deletions must not remove components unless `sync_deletions` is enabled.
+
+## Testing
+
+- Test against throwaway fixtures in `sandbox/` (gitignored), generated by
+  `sandbox/make_fixtures.py`. Never test against the user's real workbooks or
+  installed add-ins.
+- A test must prove the code is *live*, not merely that a call returned. Use
+  `app.Run("'Book.xlsm'!FuncName", args)` and assert the value.
+- Verify persistence by closing and reopening the file from disk.
+- Clean up: uninstall test add-ins in a `finally`. Leaving one flagged
+  installed makes it auto-load in the user's real Excel sessions.
+- Assert no `.xlvba-stage`/`.xlvba-tmp`/`.xlvba-bak` files remain.
+- Do not kill `EXCEL.EXE` processes in tests; a real user session may be open.
+
+## Python conventions
+
+- `from __future__ import annotations` at the top of every module.
+- Type-annotate signatures. COM objects are `Any` - they are late-bound.
+- `pathlib.Path` for paths, never string concatenation. Compare with
+  `same_path()` (Windows paths are case-insensitive).
+- Prefer `contextlib.suppress(Exception)` over bare `try/except: pass` for
+  genuinely optional COM calls.
+- Comment *why*, not *what*, and only where a constraint is not obvious from
+  the code - the COM quirks above are exactly the case for a comment.

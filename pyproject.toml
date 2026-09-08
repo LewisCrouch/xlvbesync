@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xlvba"
+version = "0.1.0"
+description = "Extract, inject and hot-reload VBA code for Excel .xlsm workbooks and .xlam add-ins from VS Code."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Lewis Crouch" }]
+keywords = ["excel", "vba", "xlam", "xlsm", "com", "hot-reload", "vscode"]
+
+classifiers = [
+    "Environment :: Win32 (MS Windows)",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Build Tools",
+]
+
+dependencies = [
+    "pywin32>=306",
+    "watchdog>=4.0.0",
+]
+
+[project.scripts]
+xlvba = "xlvba.cli:main"
+
+[tool.setuptools]
+packages = ["xlvba", "xlvba.core"]
