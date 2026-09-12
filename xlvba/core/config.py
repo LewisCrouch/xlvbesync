@@ -108,6 +108,9 @@ class ProjectConfig:
     #: Off by default: an accidental file deletion should not nuke live code.
     sync_deletions: bool = False
 
+    #: Pretty-print and rewrite UTF-8/CRLF when ``xlvba watch`` sees a save.
+    format_on_save: bool = True
+
     # -- paths ------------------------------------------------------------
 
     @property
@@ -227,6 +230,7 @@ class ProjectConfig:
             "debounce_ms": self.debounce_ms,
             "launch_excel": self.launch_excel,
             "sync_deletions": self.sync_deletions,
+            "format_on_save": self.format_on_save,
             "ignore": list(self.ignore),
             "targets": [asdict(t) for t in self.targets],
         }
@@ -267,6 +271,7 @@ class ProjectConfig:
             ignore=list(data.get("ignore", DEFAULT_IGNORE)),
             launch_excel=bool(data.get("launch_excel", False)),
             sync_deletions=bool(data.get("sync_deletions", False)),
+            format_on_save=bool(data.get("format_on_save", True)),
         )
         return cfg
 

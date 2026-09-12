@@ -35,6 +35,7 @@ from xlvba.core.components import FORM_BINARY_EXT, is_source_file
 from xlvba.core.config import MODE_SWAP, ProjectConfig, TargetConfig
 from xlvba.core.errors import XlvbaError
 from xlvba.core.excel import com_apartment
+from xlvba.core.format import format_source_file
 from xlvba.core.state import SyncState
 from xlvba.ops.inject import inject_target, remove_source
 from xlvba.ops.reload import reload_target
@@ -215,6 +216,9 @@ class SyncWorker:
         names = ", ".join(sorted(p.name for p in changed + deleted))
         console.info(f"syncing {target.resolved_name()}: {names}")
 
+        if self.config.format_on_save:
+            self._format_sources(changed)
+
         effective_mode = self.mode or target.mode
 
         # Swap mode rebuilds the whole file, so per-file granularity is moot.
@@ -244,6 +248,16 @@ class SyncWorker:
                 from xlvba.ops.inject import print_report
 
                 print_report(report, verbose=self.verbose)
+
+    def _format_sources(self, changed: list[Path]) -> None:
+        for path in changed:
+            if not path.is_file() or not is_source_file(path):
+                continue
+            try:
+                if format_source_file(path):
+                    console.detail(f"formatted {path.name}")
+            except OSError as exc:
+                console.warn(f"could not format {path.name}: {exc}")
 
 
 def watch(

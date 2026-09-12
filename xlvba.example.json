@@ -4,6 +4,7 @@
   "debounce_ms": 250,
   "launch_excel": false,
   "sync_deletions": false,
+  "format_on_save": true,
   "ignore": [
     ".git/**",
     ".venv/**",

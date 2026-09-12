@@ -4,8 +4,8 @@
     {
       "label": "Start VBA Watcher",
       "type": "shell",
-      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
-      "args": ["-m", "xlvba", "watch"],
+      "command": "xlvba",
+      "args": ["watch"],
       "options": { "cwd": "${workspaceFolder}" },
       "isBackground": true,
       "presentation": {
@@ -32,32 +32,32 @@
     {
       "label": "Extract VBA",
       "type": "shell",
-      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
-      "args": ["-m", "xlvba", "extract"],
+      "command": "xlvba",
+      "args": ["extract"],
       "options": { "cwd": "${workspaceFolder}" },
       "problemMatcher": []
     },
     {
       "label": "Inject VBA",
       "type": "shell",
-      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
-      "args": ["-m", "xlvba", "inject"],
+      "command": "xlvba",
+      "args": ["inject"],
       "options": { "cwd": "${workspaceFolder}" },
       "problemMatcher": []
     },
     {
       "label": "Reload Add-in (swap)",
       "type": "shell",
-      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
-      "args": ["-m", "xlvba", "reload"],
+      "command": "xlvba",
+      "args": ["reload"],
       "options": { "cwd": "${workspaceFolder}" },
       "problemMatcher": []
     },
     {
       "label": "Doctor",
       "type": "shell",
-      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
-      "args": ["-m", "xlvba", "doctor"],
+      "command": "xlvba",
+      "args": ["doctor"],
       "options": { "cwd": "${workspaceFolder}" },
       "problemMatcher": []
     }

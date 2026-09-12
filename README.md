@@ -53,28 +53,30 @@ you type - including add-ins, which Excel normally keeps locked.
 
 ## Install
 
+Install into the Python that is already on your PATH. That registers `xlvba`
+as a global command, so you can run it from any directory.
+
 ```powershell
 git clone https://github.com/LewisCrouch/xlvba.git
 cd xlvba
 
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+python -m pip install -e .
 
 # Registers the COM type libraries pywin32 needs.
-.\.venv\Scripts\python.exe .\.venv\Scripts\pywin32_postinstall.py -install
-
-# Install the CLI itself (editable, so you can hack on it).
-.\.venv\Scripts\python.exe -m pip install -e .
+$scripts = python -c "import sysconfig; print(sysconfig.get_path('scripts'))"
+python "$scripts\pywin32_postinstall.py" -install
 ```
 
-Then confirm the whole chain works:
+Confirm the command is on PATH and the COM chain works:
 
 ```powershell
-.\.venv\Scripts\python.exe -m xlvba doctor
+xlvba --version
+xlvba doctor
 ```
 
-Everything in this README uses `python -m xlvba`. After `pip install -e .` a
-plain `xlvba` command is also on PATH inside the virtualenv.
+The install is editable, so changes under `xlvba/` are live the next time you
+run the command. A project `.venv` is optional if you prefer an isolated
+interpreter; activate it first or `xlvba` will not be on PATH.
 
 ---
 
@@ -110,13 +112,13 @@ Setting it by hand works, but Excel must be restarted afterwards.
 
 ```powershell
 # 1. Point xlvba at a workbook or add-in.
-python -m xlvba init --target "C:\work\Reporting.xlsm"
+xlvba init --target "C:\work\Reporting.xlsm"
 
 # 2. Pull the existing VBA into src/.
-python -m xlvba extract
+xlvba extract
 
 # 3. Start hot-reloading.
-python -m xlvba watch
+xlvba watch
 ```
 
 Now open `src/Reporting/modUtil.bas` in VS Code and save. The change is live in
@@ -208,8 +210,8 @@ Two subtleties this handles that naive implementations miss:
 Set the default per target in `xlvba.json`, or override with `--mode`:
 
 ```powershell
-python -m xlvba reload --target MyTools --mode swap
-python -m xlvba watch --mode swap
+xlvba reload --target MyTools --mode swap
+xlvba watch --mode swap
 ```
 
 ---
@@ -231,7 +233,7 @@ Global options available on every subcommand:
 ### `init`
 
 ```powershell
-python -m xlvba init --target Reporting.xlsm --target MyTools.xlam
+xlvba init --target Reporting.xlsm --target MyTools.xlam
 ```
 
 Creates `xlvba.json`. Repeat `--target` for several files. Running it again
@@ -243,9 +245,9 @@ pair) the source folders are auto-named `Book-xlsm` and `Book-xlam`.
 ### `extract`
 
 ```powershell
-python -m xlvba extract
-python -m xlvba extract --target MyTools --prune
-python -m xlvba extract --dry-run -v
+xlvba extract
+xlvba extract --target MyTools --prune
+xlvba extract --dry-run -v
 ```
 
 | Option | Meaning |
@@ -262,9 +264,9 @@ copy is injected into the target instead. See
 ### `inject`
 
 ```powershell
-python -m xlvba inject
-python -m xlvba inject --file src/MyTools/modUtil.bas
-python -m xlvba inject --force --no-save
+xlvba inject
+xlvba inject --file src/MyTools/modUtil.bas
+xlvba inject --force --no-save
 ```
 
 | Option | Meaning |
@@ -280,7 +282,7 @@ New files are created automatically; there is no separate "add module" step.
 ### `reload`
 
 ```powershell
-python -m xlvba reload --target MyTools --mode swap
+xlvba reload --target MyTools --mode swap
 ```
 
 Inject plus, in swap mode, the full add-in unload/replace/reload cycle.
@@ -288,9 +290,9 @@ Inject plus, in swap mode, the full add-in unload/replace/reload cycle.
 ### `watch`
 
 ```powershell
-python -m xlvba watch
-python -m xlvba watch --target MyTools --mode swap --debounce 400
-python -m xlvba watch --initial-sync
+xlvba watch
+xlvba watch --target MyTools --mode swap --debounce 400
+xlvba watch --initial-sync
 ```
 
 | Option | Meaning |
@@ -302,10 +304,14 @@ python -m xlvba watch --initial-sync
 
 Stop with Ctrl+C.
 
+When `format_on_save` is true (the default), each save is pretty-printed and
+rewritten as UTF-8 (no BOM) with CRLF endings before it is injected. Set
+`"format_on_save": false` in `xlvba.json` to leave files untouched.
+
 ### `list`
 
 ```powershell
-python -m xlvba list
+xlvba list
 ```
 
 Shows both sides at once, including files that exist only locally:
@@ -326,7 +332,7 @@ modBrandNew.bas   local only       -      yes    will be created
 ### `doctor`
 
 ```powershell
-python -m xlvba doctor
+xlvba doctor
 ```
 
 Checks platform, `pywin32`, `watchdog`, encoding, the `AccessVBOM` registry
@@ -348,6 +354,7 @@ Created by `init`, searched for upwards from the current directory. See
   "debounce_ms": 250,
   "launch_excel": false,
   "sync_deletions": false,
+  "format_on_save": true,
   "ignore": ["**/*.frx", "**/~$*"],
   "targets": [
     {
@@ -369,6 +376,7 @@ Created by `init`, searched for upwards from the current directory. See
 | `debounce_ms` | `250` | Watcher coalesce window |
 | `launch_excel` | `false` | Start Excel automatically when it is not running |
 | `sync_deletions` | `false` | Deleting a local file removes the component |
+| `format_on_save` | `true` | Watch pretty-prints and rewrites UTF-8/CRLF on save |
 | `ignore` | see example | Glob patterns excluded from watching and injection |
 
 Per target:
@@ -432,7 +440,7 @@ own folder would silently create a local override and quietly fork the library,
 so `extract` does the opposite:
 
 ```powershell
-python -m xlvba extract --target Reporting
+xlvba extract --target Reporting
 ```
 
 - Shared components are **not** written to `src/Reporting/`. They are reported
@@ -447,7 +455,7 @@ When Excel really does hold the newer version - you edited the module in the
 VBE - ask for it explicitly:
 
 ```powershell
-python -m xlvba extract --target Reporting --extract-shared
+xlvba extract --target Reporting --extract-shared
 ```
 
 That writes each shared component back over its file **in the shared folder it
@@ -457,7 +465,7 @@ edit then propagates to every other target on the next inject or save.
 ### Ad-hoc use without a config
 
 ```powershell
-python -m xlvba extract --target "C:\work\Reporting.xlsm" --src-dir vba
+xlvba extract --target "C:\work\Reporting.xlsm" --src-dir vba
 ```
 
 Passing a file path to `--target` skips `xlvba.json` entirely.
@@ -604,9 +612,14 @@ characters (`é`, `ü`, `€`) round-trip fine.
 
 ### `ModuleNotFoundError: No module named 'win32com'`
 
-Dependencies were installed into a different interpreter. Use the venv's
-Python explicitly (`.\.venv\Scripts\python.exe -m xlvba ...`) and run the
-`pywin32_postinstall.py -install` step.
+Dependencies were installed into a different interpreter than the one that
+runs `xlvba`. Reinstall with the same `python` that is on PATH:
+
+```powershell
+python -m pip install -e .
+$scripts = python -c "import sysconfig; print(sysconfig.get_path('scripts'))"
+python "$scripts\pywin32_postinstall.py" -install
+```
 
 ### A userform lost its controls
 
@@ -642,8 +655,11 @@ by side. Recover with `xlvba extract --force` from a good copy of the workbook.
 ## Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -e .
+python -m pip install -e .
 ```
+
+That is the same editable install used in [Install](#install). `xlvba` then
+picks up local source changes without a reinstall.
 
 Source layout:
 
@@ -661,6 +677,7 @@ Source layout:
 | `xlvba/core/vbproject.py` | Enumerate and export components |
 | `xlvba/core/mutate.py` | Import, replace, create, remove (with rollback) |
 | `xlvba/core/codec.py` | UTF-8 <-> ANSI bridge, VBE header parsing |
+| `xlvba/core/format.py` | Watch format-on-save (indent, keyword case, CRLF) |
 | `xlvba/core/config.py` | `xlvba.json` loading, target resolution, and validation |
 | `xlvba/core/state.py` | Content-hash cache |
 | `xlvba/core/errors.py` | HRESULT decoding, actionable exceptions |
