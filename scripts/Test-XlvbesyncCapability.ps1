@@ -1,8 +1,10 @@
 # Probe whether this PC can host a PowerShell port of xlvbesync.
 #
-# Starts one hidden Excel that this script owns, exercises the VBA project
-# object model on a new unsaved workbook, then quits that instance. An Excel
-# you already have open is left alone, and nothing is saved.
+# Starts one hidden Excel that this script owns. It exercises the VBA project
+# on a new unsaved workbook, then on a throwaway .xlsm it saves and reopens,
+# then on a throwaway .xlam it installs, swaps, and uninstalls. Those files
+# live under TEMP and are deleted. An Excel you already have open is left
+# alone, and none of your workbooks or add-ins are opened or uninstalled.
 #
 # If the script hangs, Excel has a modal dialog open. Press Esc in that
 # window, or press Ctrl+C here.
@@ -15,8 +17,8 @@
 #   Get-Content .\scripts\Test-XlvbesyncCapability.ps1 -Raw | Invoke-Expression
 #
 # Exit codes:
-#   0  live VBProject read/write works, and Add-Type plus FileSystemWatcher work
-#   1  live VBProject read/write works, but a secondary capability does not
+#   0  VBProject write, open-workbook inject, xlam swap, Add-Type, and FileSystemWatcher work
+#   1  VBProject write works, but a secondary capability does not
 #   3  only the cscript fallback can drive VBProject
 #   2  VBProject automation is blocked
 
@@ -31,6 +33,9 @@ $script:PsVbomRead = $false
 $script:PsVbomWrite = $false
 $script:PsImport = $false
 $script:PsDocument = $false
+$script:PsOpenInject = $false
+$script:PsAddinSwap = $false
+$script:ExcelVersion = $null
 $script:AddTypeOk = $false
 $script:WatcherOk = $false
 $script:CscriptWrite = $false
@@ -888,6 +893,480 @@ function Remove-VbaComponentByName {
     }
 }
 
+function New-ProbeFunctionText {
+    param([string]$Name, [int]$Value)
+    return "Public Function $Name() As Long`r`n    $Name = $Value`r`nEnd Function`r`n"
+}
+
+function Write-ProbeBas {
+    param([string]$Path, [string]$ModuleName, [string]$FunctionName, [int]$Value)
+    # Import reads the ANSI code page. Attribute VB_Name has to be the first
+    # line or Excel renames the module on the way in. The procedure name is
+    # not the module name: Application.Run cannot see a procedure that shares
+    # its module's name.
+    $body = "Attribute VB_Name = ""$ModuleName""`r`n" + (New-ProbeFunctionText -Name $FunctionName -Value $Value)
+    $encoding = [System.Text.Encoding]::GetEncoding(1252)
+    [System.IO.File]::WriteAllText($Path, $body, $encoding)
+}
+
+function Open-ProbeWorkbook {
+    param($Excel, [string]$Path)
+    $opened = Invoke-ComRetry { $Excel.Workbooks.Open($Path, 0, $false) }
+    if ($null -eq $opened) {
+        $opened = Get-WorkbookByName -Excel $Excel -Name (Split-Path -Leaf $Path)
+    }
+    if ($null -eq $opened) { throw "Workbooks.Open returned nothing for $Path" }
+    return $opened
+}
+
+function Get-WorkbookByName {
+    param($Excel, [string]$Name)
+    # A loaded add-in is absent from Workbooks iteration and from Count, but
+    # the name indexer still resolves it.
+    try { return $Excel.Workbooks.Item($Name) }
+    catch { return $null }
+}
+
+function Test-SamePath {
+    param([string]$Left, [string]$Right)
+    try {
+        $a = [System.IO.Path]::GetFullPath($Left)
+        $b = [System.IO.Path]::GetFullPath($Right)
+    }
+    catch { return $false }
+    return [string]::Equals($a, $b, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Test-ProbeFileLocked {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return $false }
+    $stream = $null
+    try {
+        # No sharing: this fails while Excel holds the add-in, which is the
+        # condition a later replace would hit.
+        $stream = [System.IO.File]::Open(
+            $Path,
+            [System.IO.FileMode]::Open,
+            [System.IO.FileAccess]::ReadWrite,
+            [System.IO.FileShare]::None
+        )
+        return $false
+    }
+    catch { return $true }
+    finally {
+        if ($null -ne $stream) { $stream.Dispose() }
+    }
+}
+
+function Wait-ProbeFileUnlocked {
+    param([string]$Path, [int]$TimeoutSec = 15)
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    do {
+        if (-not (Test-ProbeFileLocked -Path $Path)) { return $true }
+        if ((Get-Date) -ge $deadline) { return $false }
+        Start-Sleep -Milliseconds 200
+    } while ($true)
+}
+
+function Get-ProbeAddin {
+    param($Excel, [string]$Path)
+    $count = 0
+    try { $count = [int]$Excel.AddIns.Count } catch { return $null }
+    for ($i = 1; $i -le $count; $i++) {
+        $entry = $null
+        try { $entry = $Excel.AddIns.Item($i) } catch { continue }
+        $full = ''
+        try { $full = [string]$entry.FullName } catch { $full = '' }
+        $matched = $false
+        if ($full -and (Test-SamePath $full $Path)) { $matched = $true }
+        if (-not $matched) {
+            $entryName = ''
+            try { $entryName = [string]$entry.Name } catch { $entryName = '' }
+            if ($entryName -and
+                [string]::Equals($entryName, (Split-Path -Leaf $Path), [System.StringComparison]::OrdinalIgnoreCase) -and
+                $full -and (Test-SamePath (Split-Path -Parent $full) (Split-Path -Parent $Path))) {
+                $matched = $true
+            }
+        }
+        if ($matched) { return $entry }
+        Release-ComObject $entry
+    }
+    return $null
+}
+
+function Test-ProbeWorkbookLoaded {
+    param($Excel, [string[]]$Names)
+    foreach ($candidate in $Names) {
+        if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+        $wb = Get-WorkbookByName -Excel $Excel -Name $candidate
+        if ($null -ne $wb) {
+            Release-ComObject $wb
+            return $true
+        }
+    }
+    return $false
+}
+
+function Install-ProbeAddin {
+    param($Excel, [string]$Path, [string]$FileName)
+    $entry = $null
+    try {
+        $entry = Get-ProbeAddin -Excel $Excel -Path $Path
+        if ($null -eq $entry) {
+            # Copy is false so Excel does not put a second file in the user AddIns folder.
+            $entry = $Excel.AddIns.Add($Path, $false)
+        }
+        if ($null -eq $entry) { throw 'AddIns.Add did not register the probe add-in' }
+        $entryName = ''
+        try { $entryName = [string]$entry.Name } catch { $entryName = '' }
+        $names = @($FileName, $entryName, [System.IO.Path]::GetFileNameWithoutExtension($FileName))
+        # An automation Excel can report Installed = true without loading the file.
+        # Assigning true again is then a no-op, so force a real load through false.
+        try { $entry.Installed = $false } catch { }
+        Start-Sleep -Milliseconds 200
+        $entry.Installed = $true
+        $deadline = (Get-Date).AddSeconds(20)
+        do {
+            if (Test-ProbeWorkbookLoaded -Excel $Excel -Names $names) { return }
+            if ((Get-Date) -ge $deadline) { break }
+            Start-Sleep -Milliseconds 200
+        } while ($true)
+        $flag = ''
+        $full = ''
+        try { $flag = [string]$entry.Installed } catch { $flag = 'unreadable' }
+        try { $full = [string]$entry.FullName } catch { $full = 'unreadable' }
+        throw "Add-in $FileName did not load (Installed=$flag, FullName=$full, Name=$entryName)"
+    }
+    finally {
+        Release-ComObject $entry
+    }
+}
+
+function Uninstall-ProbeAddin {
+    param($Excel, [string]$Path, [string]$FileName)
+    if ($null -eq $Excel) { return }
+    $entry = Get-ProbeAddin -Excel $Excel -Path $Path
+    if ($null -ne $entry) {
+        try { $entry.Installed = $false } catch { }
+        Release-ComObject $entry
+    }
+    $held = $null
+    foreach ($candidate in @($FileName, [System.IO.Path]::GetFileNameWithoutExtension($FileName))) {
+        $held = Get-WorkbookByName -Excel $Excel -Name $candidate
+        if ($null -ne $held) { break }
+    }
+    if ($null -ne $held) {
+        try { $held.Close($false) } catch { }
+        Release-ComObject $held
+    }
+}
+
+function Open-ProbeRegistryKey {
+    param([string]$SubKey)
+    # Get-Item opens registry keys read-only, so DeleteValue fails.
+    try { return [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($SubKey, $true) }
+    catch { return $null }
+}
+
+function Remove-StaleProbeRegistrations {
+    # Excel writes the add-in list on quit, so a probe entry removed while Excel
+    # is still running comes back. Only paths under an xlvbesync-probe temp
+    # directory are removed.
+    $versions = @('14.0', '15.0', '16.0')
+    if ($script:ExcelVersion -and ($versions -notcontains [string]$script:ExcelVersion)) {
+        $versions = @([string]$script:ExcelVersion) + $versions
+    }
+    foreach ($ver in $versions) {
+        foreach ($sub in @(
+                @{ Name = 'Options'; OpenOnly = $true },
+                @{ Name = 'Add-in Manager'; OpenOnly = $false }
+            )) {
+            $key = Open-ProbeRegistryKey -SubKey ("Software\Microsoft\Office\{0}\Excel\{1}" -f $ver, $sub.Name)
+            if ($null -eq $key) { continue }
+            try {
+                foreach ($valueName in @($key.GetValueNames())) {
+                    $raw = [string]$key.GetValue($valueName)
+                    $hit = ($valueName -like '*xlvbesync-probe-*') -or ($raw -like '*xlvbesync-probe-*')
+                    if (-not $hit) { continue }
+                    if ($sub.OpenOnly -and $valueName -notmatch '^OPEN\d*$') { continue }
+                    $key.DeleteValue($valueName, $false)
+                }
+            }
+            catch { }
+            finally { $key.Close() }
+        }
+    }
+}
+
+function Test-OpenValueIsPath {
+    param([string]$Value, [string]$FullPath)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $false }
+    $text = $Value.Trim()
+    if ($text.StartsWith('/R')) { $text = $text.Substring(2).Trim() }
+    $text = $text.Trim().Trim('"')
+    return (Test-SamePath $text $FullPath)
+}
+
+function Remove-ProbeAddinRegistration {
+    param([string]$Path)
+    # Only values that point at this temp file. The user's own add-ins stay.
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) {
+        if ([string]::IsNullOrWhiteSpace($Path)) { return }
+    }
+    $full = $null
+    try { $full = [System.IO.Path]::GetFullPath($Path) } catch { return }
+    $versions = @('14.0', '15.0', '16.0')
+    if ($script:ExcelVersion -and ($versions -notcontains [string]$script:ExcelVersion)) {
+        $versions = @([string]$script:ExcelVersion) + $versions
+    }
+    foreach ($ver in $versions) {
+        $options = Open-ProbeRegistryKey -SubKey "Software\Microsoft\Office\$ver\Excel\Options"
+        if ($null -ne $options) {
+            try {
+                foreach ($valueName in @($options.GetValueNames())) {
+                    if ($valueName -notmatch '^OPEN\d*$') { continue }
+                    $raw = [string]$options.GetValue($valueName)
+                    if (Test-OpenValueIsPath -Value $raw -FullPath $full) {
+                        $options.DeleteValue($valueName, $false)
+                    }
+                }
+            }
+            catch { }
+            finally { $options.Close() }
+        }
+        $manager = Open-ProbeRegistryKey -SubKey "Software\Microsoft\Office\$ver\Excel\Add-in Manager"
+        if ($null -ne $manager) {
+            try {
+                foreach ($valueName in @($manager.GetValueNames())) {
+                    if (Test-SamePath $valueName $full) {
+                        $manager.DeleteValue($valueName, $false)
+                    }
+                }
+            }
+            catch { }
+            finally { $manager.Close() }
+        }
+    }
+}
+
+function Invoke-ProbeMacro {
+    param($Excel, [string]$WorkbookName, [string]$FunctionName)
+    $macro = "'{0}'!{1}" -f $WorkbookName, $FunctionName
+    return Invoke-ComRetry { $Excel.Run($macro) }
+}
+
+function Test-OpenWorkbookInject {
+    param($Excel)
+    if ([string]::IsNullOrWhiteSpace($script:TempDir)) {
+        Add-ProbeResult 'Open workbook inject' 'fail' 'temp directory is not available'
+        return
+    }
+
+    $path = Join-Path $script:TempDir 'XlvProbeBook.xlsm'
+    $bas = Join-Path $script:TempDir 'XlvProbeBook.bas'
+    $module = 'modXlvProbe'
+    $fn = 'XlvProbeBook'
+    $wb = $null
+    $project = $null
+    $component = $null
+    $imported = $null
+    $watch = [System.Diagnostics.Stopwatch]::StartNew()
+    try {
+        $wb = Invoke-ComRetry { $Excel.Workbooks.Add() }
+        $project = Invoke-ComRetry { $wb.VBProject }
+        $component = Invoke-ComRetry { $project.VBComponents.Add(1) }
+        Invoke-ComRetry { $component.Name = $module } | Out-Null
+        $initial = New-ProbeFunctionText -Name $fn -Value 1
+        Invoke-ComRetry { $component.CodeModule.AddFromString($initial) } | Out-Null
+        if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
+        # 52 = xlOpenXMLWorkbookMacroEnabled
+        Invoke-ComRetry { $wb.SaveAs($path, 52) | Out-Null }
+        Invoke-ComRetry { $wb.Close($false) | Out-Null }
+        Release-ComObject $component
+        Release-ComObject $project
+        Release-ComObject $wb
+        $component = $null
+        $project = $null
+        $wb = $null
+        if (-not (Wait-ProbeFileUnlocked -Path $path -TimeoutSec 15)) {
+            throw 'Saved workbook stayed locked after close'
+        }
+
+        $wb = Open-ProbeWorkbook -Excel $Excel -Path $path
+        $full = [string](Invoke-ComRetry { $wb.FullName })
+        if (-not (Test-SamePath $full $path)) {
+            throw "Opened workbook was $full, not the saved probe file"
+        }
+        Write-ProbeBas -Path $bas -ModuleName $module -FunctionName $fn -Value 2
+        $project = Invoke-ComRetry { $wb.VBProject }
+        Invoke-ComRetry { Remove-VbaComponentByName -Project $project -Name $module } | Out-Null
+        $imported = Invoke-ComRetry { $project.VBComponents.Import($bas) }
+        if ([string]$imported.Name -ne $module) {
+            throw "Import created $($imported.Name) instead of $module"
+        }
+        $live = [int](Invoke-ProbeMacro -Excel $Excel -WorkbookName 'XlvProbeBook.xlsm' -FunctionName $fn)
+        if ($live -ne 2) { throw "Live Run returned $live, expected 2" }
+        Invoke-ComRetry { $wb.Save() | Out-Null }
+        Invoke-ComRetry { $wb.Close($false) | Out-Null }
+        Release-ComObject $imported
+        Release-ComObject $project
+        Release-ComObject $wb
+        $imported = $null
+        $project = $null
+        $wb = $null
+        if (-not (Wait-ProbeFileUnlocked -Path $path -TimeoutSec 15)) {
+            throw 'Workbook stayed locked after the injected save'
+        }
+
+        $wb = Open-ProbeWorkbook -Excel $Excel -Path $path
+        $persisted = [int](Invoke-ProbeMacro -Excel $Excel -WorkbookName 'XlvProbeBook.xlsm' -FunctionName $fn)
+        if ($persisted -ne 2) { throw "Reopened Run returned $persisted, expected 2" }
+        Invoke-ComRetry { $wb.Close($false) | Out-Null }
+        Release-ComObject $wb
+        $wb = $null
+        $watch.Stop()
+        $script:PsOpenInject = $true
+        Add-ProbeResult 'Open workbook inject' 'ok' (
+            'live and reopened Run returned 2 in {0:0.0} ms' -f $watch.Elapsed.TotalMilliseconds
+        )
+    }
+    catch {
+        Add-ProbeResult 'Open workbook inject' 'fail' (Get-ErrorDetail $_) (
+            'Live inject into an open saved workbook needs remove-then-import and Application.Run against that open file.'
+        )
+    }
+    finally {
+        if ($null -ne $wb) {
+            try { $wb.Close($false) } catch { }
+        }
+        Release-ComObject $imported
+        Release-ComObject $component
+        Release-ComObject $project
+        Release-ComObject $wb
+    }
+}
+
+function Test-AddinSwap {
+    param($Excel)
+    if ([string]::IsNullOrWhiteSpace($script:TempDir)) {
+        Add-ProbeResult 'xlam unload-and-swap' 'fail' 'temp directory is not available'
+        return
+    }
+
+    $path = Join-Path $script:TempDir 'XlvProbeAddin.xlam'
+    $stage = Join-Path $script:TempDir 'XlvProbeAddin.xlvbesync-stage.xlam'
+    $bas = Join-Path $script:TempDir 'XlvProbeAddin.bas'
+    $backup = "$path.xlvbesync-bak"
+    $replaced = "$path.xlvbesync-tmp"
+    $fileName = 'XlvProbeAddin.xlam'
+    $stageName = 'XlvProbeAddin.xlvbesync-stage.xlam'
+    $module = 'modXlvProbe'
+    $fn = 'XlvProbeAddin'
+    $wb = $null
+    $stageWb = $null
+    $project = $null
+    $component = $null
+    $imported = $null
+    $watch = [System.Diagnostics.Stopwatch]::StartNew()
+    try {
+        $wb = Invoke-ComRetry { $Excel.Workbooks.Add() }
+        $project = Invoke-ComRetry { $wb.VBProject }
+        $component = Invoke-ComRetry { $project.VBComponents.Add(1) }
+        Invoke-ComRetry { $component.Name = $module } | Out-Null
+        $initial = New-ProbeFunctionText -Name $fn -Value 1
+        Invoke-ComRetry { $component.CodeModule.AddFromString($initial) } | Out-Null
+        if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
+        # 55 = xlOpenXMLAddIn. Save as a workbook first; setting IsAddin before
+        # SaveAs leaves a file Excel will not load from AddIns.
+        Invoke-ComRetry { $wb.SaveAs($path, 55) | Out-Null }
+        try { Invoke-ComRetry { $wb.IsAddin = $true } | Out-Null } catch { }
+        try { Invoke-ComRetry { $wb.Save() | Out-Null } } catch { }
+        Invoke-ComRetry { $wb.Close($false) | Out-Null }
+        Release-ComObject $component
+        Release-ComObject $project
+        Release-ComObject $wb
+        $component = $null
+        $project = $null
+        $wb = $null
+
+        Install-ProbeAddin -Excel $Excel -Path $path -FileName $fileName
+        $loaded = [int](Invoke-ProbeMacro -Excel $Excel -WorkbookName $fileName -FunctionName $fn)
+        if ($loaded -ne 1) { throw "Installed Run returned $loaded, expected 1" }
+        if (-not (Test-ProbeFileLocked -Path $path)) {
+            throw 'Add-in file was not locked after install, so it was not really loaded'
+        }
+
+        Copy-Item -LiteralPath $path -Destination $stage -Force
+        $stageWb = Open-ProbeWorkbook -Excel $Excel -Path $stage
+        Write-ProbeBas -Path $bas -ModuleName $module -FunctionName $fn -Value 2
+        $project = Invoke-ComRetry { $stageWb.VBProject }
+        Invoke-ComRetry { Remove-VbaComponentByName -Project $project -Name $module } | Out-Null
+        $imported = Invoke-ComRetry { $project.VBComponents.Import($bas) }
+        if ([string]$imported.Name -ne $module) {
+            throw "Import into the staged add-in created $($imported.Name)"
+        }
+        Invoke-ComRetry { $stageWb.Save() | Out-Null }
+        Invoke-ComRetry { $stageWb.Close($false) | Out-Null }
+        Release-ComObject $imported
+        Release-ComObject $project
+        Release-ComObject $stageWb
+        $imported = $null
+        $project = $null
+        $stageWb = $null
+        # Opening an .xlam can register it. Drop that registration before the
+        # unlock wait, or the staged copy stays locked and cannot replace the original.
+        Uninstall-ProbeAddin -Excel $Excel -Path $stage -FileName $stageName
+        if (-not (Wait-ProbeFileUnlocked -Path $stage -TimeoutSec 15)) {
+            throw 'Staged add-in stayed locked after close'
+        }
+
+        Uninstall-ProbeAddin -Excel $Excel -Path $path -FileName $fileName
+        if (-not (Wait-ProbeFileUnlocked -Path $path -TimeoutSec 15)) {
+            $owner = Join-Path $script:TempDir '~$XlvProbeAddin.xlam'
+            $hint = ''
+            if (Test-Path -LiteralPath $owner) { $hint = " Owner file $owner is still present." }
+            throw "XlvProbeAddin.xlam is still locked 15s after unload.$hint"
+        }
+
+        if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup -Force }
+        if (Test-Path -LiteralPath $replaced) { Remove-Item -LiteralPath $replaced -Force }
+        [System.IO.File]::Copy($stage, $replaced, $true)
+        [System.IO.File]::Replace($replaced, $path, $backup)
+
+        Install-ProbeAddin -Excel $Excel -Path $path -FileName $fileName
+        $swapped = [int](Invoke-ProbeMacro -Excel $Excel -WorkbookName $fileName -FunctionName $fn)
+        if ($swapped -ne 2) { throw "Swapped Run returned $swapped, expected 2" }
+        $watch.Stop()
+        $script:PsAddinSwap = $true
+        Add-ProbeResult 'xlam unload-and-swap' 'ok' (
+            'installed, locked, swapped, Run returned 2 in {0:0.0} ms' -f $watch.Elapsed.TotalMilliseconds
+        )
+    }
+    catch {
+        Add-ProbeResult 'xlam unload-and-swap' 'fail' (Get-ErrorDetail $_) (
+            'Add-in swap needs a real load, an unlock after Installed is set false, then a replace and a reload.'
+        )
+    }
+    finally {
+        if ($null -ne $stageWb) {
+            try { $stageWb.Close($false) } catch { }
+        }
+        try { Uninstall-ProbeAddin -Excel $Excel -Path $path -FileName $fileName } catch { }
+        try { Uninstall-ProbeAddin -Excel $Excel -Path $stage -FileName $stageName } catch { }
+        Remove-ProbeAddinRegistration -Path $path
+        Release-ComObject $imported
+        Release-ComObject $component
+        Release-ComObject $project
+        Release-ComObject $stageWb
+        Release-ComObject $wb
+        foreach ($file in @($path, $stage, $backup, $replaced, (Join-Path $script:TempDir '~$XlvProbeAddin.xlam'))) {
+            if ($file -and (Test-Path -LiteralPath $file)) {
+                try { Remove-Item -LiteralPath $file -Force -ErrorAction Stop } catch { }
+            }
+        }
+    }
+}
+
 function Test-ExcelAutomation {
     Add-ProbeSection 'Excel COM and VBProject'
     Add-ProbeLine '.. If this section hangs, press Esc in Excel or Ctrl+C here.'
@@ -913,6 +1392,7 @@ function Test-ExcelAutomation {
 
     try {
         Add-ProbeLine '.. Starting a hidden Excel instance.'
+        Remove-StaleProbeRegistrations
         $before = Get-ExcelPids
         try {
             $excel = New-Object -ComObject Excel.Application
@@ -948,6 +1428,7 @@ function Test-ExcelAutomation {
 
         $version = [string](Invoke-ComRetry { $excel.Version })
         $script:PsExcel = $true
+        $script:ExcelVersion = $version
         $pidText = if ($owned) { 'new process PID {0}' -f ($script:OwnedPids -join ', ') } else { 'no new process; tests run on an already-open Excel and it will not be quit' }
         Add-ProbeResult 'Excel.Application create' 'ok' ('Excel {0}; {1}' -f $version, $pidText)
 
@@ -1097,6 +1578,19 @@ function Test-ExcelAutomation {
                 Add-ProbeResult 'Inject cycle timing' 'warn' (Get-ErrorDetail $_)
             }
         }
+
+        if ($script:PsVbomWrite) {
+            # msoAutomationSecurityLow. Applies only to files this instance opens
+            # after this assignment, so the probe can Run the procedure it just
+            # injected. It does not change the user's Trust Center setting.
+            try { $excel.AutomationSecurity = 1 } catch { }
+            Test-OpenWorkbookInject -Excel $excel
+            Test-AddinSwap -Excel $excel
+        }
+        else {
+            Add-ProbeResult 'Open workbook inject' 'warn' 'skipped because VBProject write failed'
+            Add-ProbeResult 'xlam unload-and-swap' 'warn' 'skipped because VBProject write failed'
+        }
     }
     catch {
         Add-ProbeResult 'Excel automation' 'fail' (Get-ErrorDetail $_) (
@@ -1140,6 +1634,9 @@ function Test-ExcelAutomation {
         # does not start a process. That list must not be treated as ours.
         if ($script:PsExcel -and -not $owned) { $script:OwnedPids = @() }
         Stop-OwnedExcel
+        # Quit rewrites the add-in list from memory. Scrub after the process
+        # is gone so a throwaway xlam is not still registered.
+        Remove-StaleProbeRegistrations
     }
 }
 
@@ -1282,7 +1779,8 @@ WScript.Quit 0
 function Get-ExitCode {
     $core = $script:PsExcel -and $script:PsVbomRead -and $script:PsVbomWrite -and
         $script:PsImport -and $script:PsDocument
-    if ($core -and $script:AddTypeOk -and $script:WatcherOk) { return 0 }
+    if ($core -and $script:AddTypeOk -and $script:WatcherOk -and
+        $script:PsOpenInject -and $script:PsAddinSwap) { return 0 }
     if ($core) { return 1 }
     if ($script:PsExcel -and $script:PsVbomRead -and $script:PsVbomWrite) { return 1 }
     if ($script:CscriptWrite) { return 3 }
@@ -1301,7 +1799,7 @@ function Write-Verdict {
     switch ($Code) {
         0 {
             Add-ProbeLine ('STATUS ready exit=0')
-            Add-ProbeLine ('A PowerShell port can do live extract and inject on this PC. Add-Type and FileSystemWatcher are available, so multi-instance discovery and a save watcher are available too.{0}' -f $timing)
+            Add-ProbeLine ('A PowerShell port can do live extract and inject on this PC, including injection into an already-open workbook and an installed .xlam unload-and-swap. Add-Type and FileSystemWatcher are available, so multi-instance discovery and a save watcher are available too.{0}' -f $timing)
         }
         1 {
             $gaps = @()
@@ -1309,6 +1807,8 @@ function Write-Verdict {
             if (-not $script:WatcherOk) { $gaps += 'FileSystemWatcher (poll about once a second instead)' }
             if (-not $script:PsImport) { $gaps += 'VBComponent.Import (standard-module replace is remove-then-import)' }
             if (-not $script:PsDocument) { $gaps += 'document-module in-place edit' }
+            if (-not $script:PsOpenInject) { $gaps += 'open-workbook inject' }
+            if (-not $script:PsAddinSwap) { $gaps += 'xlam unload-and-swap' }
             Add-ProbeLine 'STATUS degraded exit=1'
             Add-ProbeLine ('Live VBProject write works.{0} Missing: {1}.' -f $timing, ($gaps -join '; '))
         }
@@ -1339,7 +1839,7 @@ function Write-ProbeReport {
 }
 
 Add-ProbeLine 'xlvbesync work-PC capability probe'
-Add-ProbeLine 'Starts a hidden Excel of its own. Does not save, and does not quit an Excel that was already open.'
+Add-ProbeLine 'Starts a hidden Excel of its own. Throwaway workbooks stay in TEMP and are deleted. Does not save or quit an Excel that was already open.'
 Add-ProbeLine 'If this hangs, Excel has a modal dialog open. Press Esc there, or Ctrl+C here.'
 
 Test-HostEnvironment
