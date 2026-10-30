@@ -557,11 +557,33 @@ To launch it automatically when the folder opens, add to the task:
 "runOptions": { "runOn": "folderOpen", "instanceLimit": 1 }
 ```
 
+### Extension
+
+This repo includes a Cursor/VS Code extension in `vscode/`. It adds go to
+definition, completion and hover for the extracted source and the Excel/VBA
+libraries, and it opens `.frm` files in a UserForm designer modelled on the
+VBE: toolbox, dotted grid, classic MSForms controls and a property grid.
+
+Install it with a junction, then **Developer: Reload Window**:
+
+```powershell
+$dest = Join-Path $env:USERPROFILE ".cursor\extensions\xlvbesync.xlvbesync-0.1.0"
+if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
+cmd /c mklink /J "$dest" "$PWD\vscode"
+```
+
+The designer starts a private Excel process (`xlvbesync form-host`). It needs
+the same Trust access to the VBA project object model as the rest of the tool.
+**View Code** opens the code-behind beside the designer. Double-click a control
+to insert its default event procedure. The `.frx` is still binary; Excel writes
+it when the designer saves, and the watcher injects the pair as usual.
+
 ### Syntax highlighting
 
 `.vscode/settings.json` maps `.bas`, `.cls`, `.frm` and `.dcm` to the built-in
-`vb` language. For real VBA support install an extension such as **VBA** by
-*spences10* and remap the associations to `vba`.
+`vb` language. The extension registers IntelliSense for both `vb` and `vba`.
+A separate highlighter (for example **VBA** by *spences10*) can still own the
+colours; this extension only claims `.dcm` as a language id.
 
 ### Keeping files sane
 

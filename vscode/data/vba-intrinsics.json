@@ -1,0 +1,38 @@
+{
+  "LBound": {
+    "name": "LBound",
+    "kind": "Function",
+    "signature": "Function LBound(ArrayName, Optional Dimension As Long = 1) As Long",
+    "params": [
+      { "name": "ArrayName", "type": "Variant" },
+      { "name": "Dimension", "type": "Long", "optional": true, "defaultValue": "1" }
+    ],
+    "returnType": "Long"
+  },
+  "UBound": {
+    "name": "UBound",
+    "kind": "Function",
+    "signature": "Function UBound(ArrayName, Optional Dimension As Long = 1) As Long",
+    "params": [
+      { "name": "ArrayName", "type": "Variant" },
+      { "name": "Dimension", "type": "Long", "optional": true, "defaultValue": "1" }
+    ],
+    "returnType": "Long"
+  },
+  "Spc": {
+    "name": "Spc",
+    "kind": "Function",
+    "signature": "Function Spc(n As Integer)",
+    "params": [
+      { "name": "n", "type": "Integer" }
+    ]
+  },
+  "Tab": {
+    "name": "Tab",
+    "kind": "Function",
+    "signature": "Function Tab(Optional n As Integer)",
+    "params": [
+      { "name": "n", "type": "Integer", "optional": true }
+    ]
+  }
+}

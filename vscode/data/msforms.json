@@ -1,0 +1,161 @@
+{
+  "CommandButton": [
+    {"name": "Caption", "kind": "Property Get", "returnType": "String", "signature": "Property Get Caption() As String"},
+    {"name": "Accelerator", "kind": "Property Get", "returnType": "String", "signature": "Property Get Accelerator() As String"},
+    {"name": "Cancel", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get Cancel() As Boolean"},
+    {"name": "Default", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get Default() As Boolean"},
+    {"name": "Enabled", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get Enabled() As Boolean"},
+    {"name": "Visible", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get Visible() As Boolean"},
+    {"name": "Locked", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get Locked() As Boolean"},
+    {"name": "Value", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get Value() As Boolean"},
+    {"name": "WordWrap", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get WordWrap() As Boolean"},
+    {"name": "TakeFocusOnClick", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get TakeFocusOnClick() As Boolean"},
+    {"name": "ControlTipText", "kind": "Property Get", "returnType": "String", "signature": "Property Get ControlTipText() As String"},
+    {"name": "TabIndex", "kind": "Property Get", "returnType": "Integer", "signature": "Property Get TabIndex() As Integer"},
+    {"name": "TabStop", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get TabStop() As Boolean"},
+    {"name": "Left", "kind": "Property Get", "returnType": "Single", "signature": "Property Get Left() As Single"},
+    {"name": "Top", "kind": "Property Get", "returnType": "Single", "signature": "Property Get Top() As Single"},
+    {"name": "Width", "kind": "Property Get", "returnType": "Single", "signature": "Property Get Width() As Single"},
+    {"name": "Height", "kind": "Property Get", "returnType": "Single", "signature": "Property Get Height() As Single"},
+    {"name": "BackColor", "kind": "Property Get", "returnType": "Long", "signature": "Property Get BackColor() As Long"},
+    {"name": "ForeColor", "kind": "Property Get", "returnType": "Long", "signature": "Property Get ForeColor() As Long"},
+    {"name": "Font", "kind": "Property Get", "returnType": "Font", "signature": "Property Get Font() As Font"},
+    {"name": "Tag", "kind": "Property Get", "returnType": "String", "signature": "Property Get Tag() As String"},
+    {"name": "SetFocus", "kind": "Sub", "signature": "Sub SetFocus()"},
+    {"name": "Move", "kind": "Sub", "signature": "Sub Move(Left, Top, Width, Height)"}
+  ],
+  "Label": [
+    {"name": "Caption", "kind": "Property Get", "returnType": "String", "signature": "Property Get Caption() As String"},
+    {"name": "AutoSize", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get AutoSize() As Boolean"},
+    {"name": "WordWrap", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get WordWrap() As Boolean"},
+    {"name": "TextAlign", "kind": "Property Get", "returnType": "Integer", "signature": "Property Get TextAlign() As Integer"},
+    {"name": "BackStyle", "kind": "Property Get", "returnType": "Integer", "signature": "Property Get BackStyle() As Integer"},
+    {"name": "BorderStyle", "kind": "Property Get", "returnType": "Integer", "signature": "Property Get BorderStyle() As Integer"},
+    {"name": "Enabled", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get Enabled() As Boolean"},
+    {"name": "Visible", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get Visible() As Boolean"},
+    {"name": "ForeColor", "kind": "Property Get", "returnType": "Long", "signature": "Property Get ForeColor() As Long"},
+    {"name": "BackColor", "kind": "Property Get", "returnType": "Long", "signature": "Property Get BackColor() As Long"},
+    {"name": "Font", "kind": "Property Get", "returnType": "Font", "signature": "Property Get Font() As Font"},
+    {"name": "ControlTipText", "kind": "Property Get", "returnType": "String", "signature": "Property Get ControlTipText() As String"}
+  ],
+  "TextBox": [
+    {"name": "Text", "kind": "Property Get", "returnType": "String", "signature": "Property Get Text() As String"},
+    {"name": "Value", "kind": "Property Get", "returnType": "String", "signature": "Property Get Value() As String"},
+    {"name": "MultiLine", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get MultiLine() As Boolean"},
+    {"name": "PasswordChar", "kind": "Property Get", "returnType": "String", "signature": "Property Get PasswordChar() As String"},
+    {"name": "MaxLength", "kind": "Property Get", "returnType": "Long", "signature": "Property Get MaxLength() As Long"},
+    {"name": "SelStart", "kind": "Property Get", "returnType": "Long", "signature": "Property Get SelStart() As Long"},
+    {"name": "SelLength", "kind": "Property Get", "returnType": "Long", "signature": "Property Get SelLength() As Long"},
+    {"name": "SelText", "kind": "Property Get", "returnType": "String", "signature": "Property Get SelText() As String"},
+    {"name": "ScrollBars", "kind": "Property Get", "returnType": "Integer", "signature": "Property Get ScrollBars() As Integer"},
+    {"name": "TextAlign", "kind": "Property Get", "returnType": "Integer", "signature": "Property Get TextAlign() As Integer"},
+    {"name": "WordWrap", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get WordWrap() As Boolean"},
+    {"name": "Enabled", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get Enabled() As Boolean"},
+    {"name": "Locked", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get Locked() As Boolean"},
+    {"name": "Visible", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get Visible() As Boolean"},
+    {"name": "SetFocus", "kind": "Sub", "signature": "Sub SetFocus()"}
+  ],
+  "ComboBox": [
+    {"name": "Text", "kind": "Property Get", "returnType": "String", "signature": "Property Get Text() As String"},
+    {"name": "Value", "kind": "Property Get", "returnType": "Variant", "signature": "Property Get Value() As Variant"},
+    {"name": "ListIndex", "kind": "Property Get", "returnType": "Long", "signature": "Property Get ListIndex() As Long"},
+    {"name": "ListCount", "kind": "Property Get", "returnType": "Long", "signature": "Property Get ListCount() As Long"},
+    {"name": "List", "kind": "Property Get", "returnType": "Variant", "signature": "Property Get List(Index) As Variant"},
+    {"name": "Column", "kind": "Property Get", "returnType": "Variant", "signature": "Property Get Column(Index) As Variant"},
+    {"name": "AddItem", "kind": "Sub", "signature": "Sub AddItem(Item, Index)"},
+    {"name": "RemoveItem", "kind": "Sub", "signature": "Sub RemoveItem(Index)"},
+    {"name": "Clear", "kind": "Sub", "signature": "Sub Clear()"},
+    {"name": "MatchEntry", "kind": "Property Get", "returnType": "Integer", "signature": "Property Get MatchEntry() As Integer"},
+    {"name": "SetFocus", "kind": "Sub", "signature": "Sub SetFocus()"}
+  ],
+  "ListBox": [
+    {"name": "Text", "kind": "Property Get", "returnType": "String", "signature": "Property Get Text() As String"},
+    {"name": "Value", "kind": "Property Get", "returnType": "Variant", "signature": "Property Get Value() As Variant"},
+    {"name": "ListIndex", "kind": "Property Get", "returnType": "Long", "signature": "Property Get ListIndex() As Long"},
+    {"name": "ListCount", "kind": "Property Get", "returnType": "Long", "signature": "Property Get ListCount() As Long"},
+    {"name": "List", "kind": "Property Get", "returnType": "Variant", "signature": "Property Get List(Index) As Variant"},
+    {"name": "Selected", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get Selected(Index) As Boolean"},
+    {"name": "MultiSelect", "kind": "Property Get", "returnType": "Integer", "signature": "Property Get MultiSelect() As Integer"},
+    {"name": "AddItem", "kind": "Sub", "signature": "Sub AddItem(Item, Index)"},
+    {"name": "RemoveItem", "kind": "Sub", "signature": "Sub RemoveItem(Index)"},
+    {"name": "Clear", "kind": "Sub", "signature": "Sub Clear()"},
+    {"name": "SetFocus", "kind": "Sub", "signature": "Sub SetFocus()"}
+  ],
+  "CheckBox": [
+    {"name": "Caption", "kind": "Property Get", "returnType": "String", "signature": "Property Get Caption() As String"},
+    {"name": "Value", "kind": "Property Get", "returnType": "Variant", "signature": "Property Get Value() As Variant"},
+    {"name": "TripleState", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get TripleState() As Boolean"},
+    {"name": "Alignment", "kind": "Property Get", "returnType": "Integer", "signature": "Property Get Alignment() As Integer"},
+    {"name": "Enabled", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get Enabled() As Boolean"},
+    {"name": "Visible", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get Visible() As Boolean"},
+    {"name": "GroupName", "kind": "Property Get", "returnType": "String", "signature": "Property Get GroupName() As String"}
+  ],
+  "OptionButton": [
+    {"name": "Caption", "kind": "Property Get", "returnType": "String", "signature": "Property Get Caption() As String"},
+    {"name": "Value", "kind": "Property Get", "returnType": "Variant", "signature": "Property Get Value() As Variant"},
+    {"name": "GroupName", "kind": "Property Get", "returnType": "String", "signature": "Property Get GroupName() As String"},
+    {"name": "Alignment", "kind": "Property Get", "returnType": "Integer", "signature": "Property Get Alignment() As Integer"},
+    {"name": "Enabled", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get Enabled() As Boolean"},
+    {"name": "Visible", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get Visible() As Boolean"}
+  ],
+  "ToggleButton": [
+    {"name": "Caption", "kind": "Property Get", "returnType": "String", "signature": "Property Get Caption() As String"},
+    {"name": "Value", "kind": "Property Get", "returnType": "Variant", "signature": "Property Get Value() As Variant"},
+    {"name": "TripleState", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get TripleState() As Boolean"},
+    {"name": "Enabled", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get Enabled() As Boolean"},
+    {"name": "Visible", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get Visible() As Boolean"}
+  ],
+  "Frame": [
+    {"name": "Caption", "kind": "Property Get", "returnType": "String", "signature": "Property Get Caption() As String"},
+    {"name": "Controls", "kind": "Property Get", "returnType": "Controls", "signature": "Property Get Controls() As Controls"},
+    {"name": "Enabled", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get Enabled() As Boolean"},
+    {"name": "Visible", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get Visible() As Boolean"},
+    {"name": "ScrollBars", "kind": "Property Get", "returnType": "Integer", "signature": "Property Get ScrollBars() As Integer"},
+    {"name": "Cycle", "kind": "Property Get", "returnType": "Integer", "signature": "Property Get Cycle() As Integer"}
+  ],
+  "ScrollBar": [
+    {"name": "Value", "kind": "Property Get", "returnType": "Long", "signature": "Property Get Value() As Long"},
+    {"name": "Min", "kind": "Property Get", "returnType": "Long", "signature": "Property Get Min() As Long"},
+    {"name": "Max", "kind": "Property Get", "returnType": "Long", "signature": "Property Get Max() As Long"},
+    {"name": "SmallChange", "kind": "Property Get", "returnType": "Long", "signature": "Property Get SmallChange() As Long"},
+    {"name": "LargeChange", "kind": "Property Get", "returnType": "Long", "signature": "Property Get LargeChange() As Long"},
+    {"name": "Enabled", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get Enabled() As Boolean"},
+    {"name": "Visible", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get Visible() As Boolean"}
+  ],
+  "SpinButton": [
+    {"name": "Value", "kind": "Property Get", "returnType": "Long", "signature": "Property Get Value() As Long"},
+    {"name": "Min", "kind": "Property Get", "returnType": "Long", "signature": "Property Get Min() As Long"},
+    {"name": "Max", "kind": "Property Get", "returnType": "Long", "signature": "Property Get Max() As Long"},
+    {"name": "SmallChange", "kind": "Property Get", "returnType": "Long", "signature": "Property Get SmallChange() As Long"},
+    {"name": "Enabled", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get Enabled() As Boolean"},
+    {"name": "Visible", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get Visible() As Boolean"}
+  ],
+  "Image": [
+    {"name": "Picture", "kind": "Property Get", "returnType": "Picture", "signature": "Property Get Picture() As Picture"},
+    {"name": "PictureSizeMode", "kind": "Property Get", "returnType": "Integer", "signature": "Property Get PictureSizeMode() As Integer"},
+    {"name": "PictureAlignment", "kind": "Property Get", "returnType": "Integer", "signature": "Property Get PictureAlignment() As Integer"},
+    {"name": "PictureTiling", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get PictureTiling() As Boolean"},
+    {"name": "AutoSize", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get AutoSize() As Boolean"},
+    {"name": "BorderStyle", "kind": "Property Get", "returnType": "Integer", "signature": "Property Get BorderStyle() As Integer"},
+    {"name": "Enabled", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get Enabled() As Boolean"},
+    {"name": "Visible", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get Visible() As Boolean"}
+  ],
+  "MultiPage": [
+    {"name": "Value", "kind": "Property Get", "returnType": "Long", "signature": "Property Get Value() As Long"},
+    {"name": "Pages", "kind": "Property Get", "returnType": "Pages", "signature": "Property Get Pages() As Pages"},
+    {"name": "Enabled", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get Enabled() As Boolean"},
+    {"name": "Visible", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get Visible() As Boolean"}
+  ],
+  "TabStrip": [
+    {"name": "Value", "kind": "Property Get", "returnType": "Long", "signature": "Property Get Value() As Long"},
+    {"name": "Tabs", "kind": "Property Get", "returnType": "Tabs", "signature": "Property Get Tabs() As Tabs"},
+    {"name": "Enabled", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get Enabled() As Boolean"},
+    {"name": "Visible", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get Visible() As Boolean"}
+  ],
+  "Page": [
+    {"name": "Caption", "kind": "Property Get", "returnType": "String", "signature": "Property Get Caption() As String"},
+    {"name": "Controls", "kind": "Property Get", "returnType": "Controls", "signature": "Property Get Controls() As Controls"},
+    {"name": "Enabled", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get Enabled() As Boolean"},
+    {"name": "Visible", "kind": "Property Get", "returnType": "Boolean", "signature": "Property Get Visible() As Boolean"}
+  ]
+}

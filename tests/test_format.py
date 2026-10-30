@@ -78,6 +78,30 @@ class FormatTests(unittest.TestCase):
         self.assertIn("Close #fileNum: On Error GoTo 0\r\n", out)
         self.assertNotIn("#fileNum#", out)
 
+    def test_userform_header_is_not_formatted(self) -> None:
+        src = (
+            "VERSION 5.00\r\n"
+            "Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} frmDemo \r\n"
+            '   Caption         =   "Demo Form"\r\n'
+            "   ClientHeight    =   3015\r\n"
+            '   OleObjectBlob   =   "frmDemo.frx":0000\r\n'
+            "End\r\n"
+            'Attribute VB_Name = "frmDemo"\r\n'
+            "Attribute VB_GlobalNameSpace = False\r\n"
+            "\r\n"
+            "Option Explicit\r\n"
+            "\r\n"
+            "Private Sub btnGo_Click()\r\n"
+            'msgbox "clicked"\r\n'
+            "End Sub\r\n"
+        )
+        out = format_vba(src, indent="    ")
+        self.assertIn('   Caption         =   "Demo Form"\r\n', out)
+        self.assertIn('   OleObjectBlob   =   "frmDemo.frx":0000\r\n', out)
+        self.assertIn("Private Sub btnGo_Click()\r\n", out)
+        self.assertIn('    msgbox "clicked"\r\n', out)
+        self.assertNotIn("    Caption", out)
+
     def test_tab_indent_inside_procedure(self) -> None:
         src = (
             "Public Function Foo() As Long\r\n"

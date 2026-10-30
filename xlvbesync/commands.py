@@ -326,3 +326,10 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         return 0
     console.line("\nOne or more critical checks failed; see remedies above.", "error")
     return 1
+
+
+def cmd_form_host(_args: argparse.Namespace) -> int:
+    """Speak JSON with the UserForm designer. Replies are the only stdout."""
+    from xlvbesync.ops.forms import serve
+
+    return serve()

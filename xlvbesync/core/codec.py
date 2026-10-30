@@ -173,8 +173,10 @@ def convert_export_to_utf8(
 # VBA source header handling
 # ---------------------------------------------------------------------------
 
-#: Matches the ``VERSION 1.0 CLASS`` banner that opens .cls/.frm exports.
-_VERSION_RE = re.compile(r"^VERSION\s+[\d.]+\s+CLASS\s*$", re.IGNORECASE)
+#: ``VERSION 1.0 CLASS`` opens class exports. UserForm exports open with
+#: ``VERSION 5.00`` and no CLASS token; both are headers, not code.
+_VERSION_CLASS_RE = re.compile(r"^VERSION\s+[\d.]+\s+CLASS\s*$", re.IGNORECASE)
+_VERSION_FORM_RE = re.compile(r"^VERSION\s+[\d.]+\s*$", re.IGNORECASE)
 
 #: Matches a bare ``Attribute VB_Name = "Foo"`` line.
 _ATTR_NAME_RE = re.compile(r'^Attribute\s+VB_Name\s*=\s*"(?P<name>[^"]*)"\s*$', re.IGNORECASE)
@@ -184,8 +186,9 @@ def split_header(text: str) -> tuple[str, str]:
     """Split a VBE export into ``(header, body)``.
 
     The *header* is the metadata preamble the VBE requires on import: the
-    ``VERSION`` banner, the ``BEGIN...END`` block for classes/forms, and the
-    ``Attribute VB_*`` lines. The *body* is the actual code.
+    ``VERSION`` banner (``VERSION 1.0 CLASS`` or a UserForm ``VERSION 5.00``),
+    the ``BEGIN...END`` block for classes/forms, and the ``Attribute VB_*``
+    lines. The *body* is the actual code.
 
     For a plain standard module the header is usually just the ``Attribute
     VB_Name`` line. Returning them separately lets us push only the body
@@ -196,7 +199,8 @@ def split_header(text: str) -> tuple[str, str]:
     idx = 0
     n = len(lines)
 
-    if idx < n and _VERSION_RE.match(lines[idx].strip()):
+    banner = lines[idx].strip() if idx < n else ""
+    if _VERSION_CLASS_RE.match(banner) or _VERSION_FORM_RE.match(banner):
         idx += 1
         # Optional BEGIN ... END block (present for classes and userforms).
         if idx < n and lines[idx].strip().upper().startswith("BEGIN"):

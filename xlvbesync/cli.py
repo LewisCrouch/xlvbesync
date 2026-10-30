@@ -22,6 +22,7 @@ examples:
   xlvbesync list                           show components on both sides
   xlvbesync format                         pretty-print all local source files
   xlvbesync doctor                         diagnose setup problems
+  xlvbesync form-host                      designer stdio host (used by the extension)
 """
 
 
@@ -211,6 +212,13 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common(p_dr)
     _add_target(p_dr, help_text="target name or file (default: all targets)")
     p_dr.set_defaults(func=commands.cmd_doctor)
+
+    # -- form-host --------------------------------------------------------
+    p_form = sub.add_parser(
+        "form-host",
+        help="stdio host for the UserForm designer (one JSON command per line)",
+    )
+    p_form.set_defaults(func=commands.cmd_form_host)
 
     return parser
 

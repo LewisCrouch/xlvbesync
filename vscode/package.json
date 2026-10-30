@@ -1,0 +1,76 @@
+{
+  "name": "xlvbesync",
+  "displayName": "xlvbesync",
+  "description": "VBA IntelliSense and a VBE-style UserForm designer for projects edited with xlvbesync",
+  "version": "0.1.0",
+  "publisher": "xlvbesync",
+  "private": true,
+  "scripts": {
+    "test": "node test.js"
+  },
+  "engines": {
+    "node": ">=18",
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:vba",
+    "onLanguage:vb",
+    "onCustomEditor:xlvbesync.formDesigner",
+    "workspaceContains:**/*.frm"
+  ],
+  "main": "./src/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "vba",
+        "aliases": [
+          "Visual Basic for Applications",
+          "VBA"
+        ],
+        "extensions": [
+          ".dcm"
+        ]
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "xlvbesync.formDesigner",
+        "displayName": "VBA Form Designer",
+        "selector": [
+          {
+            "filenamePattern": "*.frm"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
+    "commands": [
+      {
+        "command": "xlvbesync.newUserForm",
+        "title": "xlvbesync: New UserForm"
+      },
+      {
+        "command": "xlvbesync.viewCode",
+        "title": "xlvbesync: View Code"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "xlvbesync.viewCode",
+          "when": "activeCustomEditorId == xlvbesync.formDesigner",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "xlvbesync.viewCode",
+          "when": "activeCustomEditorId == xlvbesync.formDesigner"
+        }
+      ]
+    }
+  }
+}
