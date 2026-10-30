@@ -12,7 +12,7 @@ import functools
 import time
 from typing import Any, Callable, TypeVar
 
-from xlvba.core.errors import com_description, hresult_of, is_transient
+from xlvbesync.core.errors import com_description, hresult_of, is_transient
 
 T = TypeVar("T")
 

@@ -1,12 +1,12 @@
-"""Project bootstrap: create ``xlvba.json`` for a target."""
+"""Project bootstrap: create ``xlvbesync.json`` for a target."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from xlvba.core import console
-from xlvba.core.addin import is_addin
-from xlvba.core.config import (
+from xlvbesync.core import console
+from xlvbesync.core.addin import is_addin
+from xlvbesync.core.config import (
     CONFIG_FILENAME,
     MODE_LIVE,
     DEFAULT_SRC_DIR,
@@ -15,7 +15,7 @@ from xlvba.core.config import (
     load_config,
     save_config,
 )
-from xlvba.core.errors import ConfigError, TargetNotFoundError
+from xlvbesync.core.errors import ConfigError, TargetNotFoundError
 
 
 def init_project(
@@ -23,10 +23,10 @@ def init_project(
     target_paths: list[str],
     *,
     src_dir: str = DEFAULT_SRC_DIR,
-    mode: str = MODE_LIVE,
+    mode: str | None = None,
     force: bool = False,
 ) -> Path:
-    """Create or extend ``xlvba.json`` in ``root``.
+    """Create or extend ``xlvbesync.json`` in ``root``.
 
     Relative target paths are stored relative to the project root so the config
     stays portable between machines.
@@ -56,7 +56,7 @@ def init_project(
     if not target_paths:
         raise ConfigError(
             "At least one --target is required to initialise a project.",
-            "Example: xlvba init --target MyBook.xlsm",
+            "Example: xlvbesync init --target MyBook.xlsm",
         )
 
     entries = [_make_target(root, raw, mode) for raw in target_paths]
@@ -92,7 +92,7 @@ def _disambiguate(entries: list[TargetConfig]) -> None:
             console.detail(f"named source folder '{entry.name}' to avoid a clash")
 
 
-def _make_target(root: Path, raw: str, mode: str) -> TargetConfig:
+def _make_target(root: Path, raw: str, mode: str | None) -> TargetConfig:
     """Build a target entry, validating that the file exists."""
     path = Path(raw)
     resolved = path if path.is_absolute() else (root / path)
@@ -110,10 +110,16 @@ def _make_target(root: Path, raw: str, mode: str) -> TargetConfig:
     except ValueError:
         stored = str(resolved)
 
-    # An add-in defaults to live mode too, but swap is available per-target.
-    entry = TargetConfig(path=stored, mode=mode)
+    # Add-ins default to swap mode so hot-reload works reliably out of the box;
+    # regular workbooks default to live mode.
+    if mode is None:
+        chosen_mode = MODE_SWAP if is_addin(resolved) else MODE_LIVE
+    else:
+        chosen_mode = mode
+
+    entry = TargetConfig(path=stored, mode=chosen_mode)
     entry.validate()
 
     if is_addin(resolved):
-        console.detail(f"{resolved.name}: add-in detected (mode={mode})")
+        console.detail(f"{resolved.name}: add-in detected (mode={chosen_mode})")
     return entry

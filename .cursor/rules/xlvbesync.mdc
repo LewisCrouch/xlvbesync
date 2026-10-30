@@ -5,11 +5,11 @@ alwaysApply: true
 ---
 
 The authoritative rules for this project live in [.cursorrules](../../.cursorrules)
-at the repository root. Read that file before changing any code under `xlvba/`.
+at the repository root. Read that file before changing any code under `xlvbesync/`.
 
 Non-negotiables, summarised:
 
-1. Only `xlvba/core/` may call `win32com.client`. Higher layers use its helpers.
+1. Only `xlvbesync/core/` may call `win32com.client`. Higher layers use its helpers.
 2. Attach with `get_excel_for(path)`, never raw `GetActiveObject` - Excel can
    run multiple instances and the wrong one silently reports false success.
 3. Loaded `.xlam` add-ins do not appear in `Workbooks` iteration but do resolve
@@ -22,11 +22,11 @@ Non-negotiables, summarised:
 7. Retry only `-2147418111` and `-2147417846` via `@com_retry()`. Decode
    HRESULTs with `hresult_of()`, which unwraps `DISP_E_EXCEPTION`.
 8. All disk files are UTF-8 (no BOM, CRLF); the VBE is ANSI. Always transcode
-   through `xlvba/core/codec.py`. Report lossy characters, never silently
+   through `xlvbesync/core/codec.py`. Report lossy characters, never silently
    write `?`.
 9. Document modules (type 100) are line-synced in place and matched by sheet
    CodeName; they cannot be imported, created or removed.
 10. For `.xlam` swaps: stage a copy, unload from every instance, poll for the
     handle to drop, `os.replace`, then reinstall inside a `finally`.
 11. Never touch add-ins that are not configured project targets.
-12. Use `xlvba.core.console`, never `print()`.
+12. Use `xlvbesync.core.console`, never `print()`.

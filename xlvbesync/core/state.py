@@ -14,7 +14,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-STATE_FILENAME = ".xlvba-state.json"
+STATE_FILENAME = ".xlvbesync-state.json"
 
 
 def hash_text(text: str) -> str:

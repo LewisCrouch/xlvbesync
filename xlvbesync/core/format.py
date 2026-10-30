@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from xlvba.core.codec import (
+from xlvbesync.core.codec import (
     TEXT_ENCODING,
     VBA_NEWLINE,
     normalise_newlines,
@@ -20,7 +20,8 @@ from xlvba.core.codec import (
     write_text,
 )
 
-INDENT = "    "
+#: Default indent when the project does not set ``indent`` in xlvbesync.json.
+DEFAULT_INDENT = "    "
 
 # Language keywords and built-in types only. Functions that are commonly
 # used as names (Left, Right, Name, ...) are left to the author.
@@ -150,10 +151,14 @@ _LABEL = re.compile(r"^([A-Za-z][A-Za-z0-9_]*)\s*:\s*$")
 _LABEL_SKIP = frozenset({"else", "case"})
 
 
-def format_vba(text: str) -> str:
-    """Return ``text`` pretty-printed with CRLF endings and no BOM."""
+def format_vba(text: str, *, indent: str | None = None) -> str:
+    """Return ``text`` pretty-printed with CRLF endings and no BOM.
+
+    ``indent`` is the unit repeated per indent level (``"\\t"`` or spaces).
+    """
+    unit = DEFAULT_INDENT if indent is None else indent
     header, body = split_header(normalise_newlines(strip_bom(text), VBA_NEWLINE))
-    formatted_body = _format_body(body)
+    formatted_body = _format_body(body, unit)
     if header and formatted_body:
         result = header + VBA_NEWLINE + formatted_body
     elif header:
@@ -165,9 +170,9 @@ def format_vba(text: str) -> str:
     return normalise_newlines(result, VBA_NEWLINE)
 
 
-def format_source_file(path: Path) -> bool:
+def format_source_file(path: Path, *, indent: str | None = None) -> bool:
     """Format ``path`` in place. Return True when the on-disk bytes changed."""
-    formatted = format_vba(read_text(path))
+    formatted = format_vba(read_text(path), indent=indent)
     expected = normalise_newlines(strip_bom(formatted), VBA_NEWLINE).encode(TEXT_ENCODING)
     if path.read_bytes() == expected:
         return False
@@ -175,7 +180,7 @@ def format_source_file(path: Path) -> bool:
     return True
 
 
-def _format_body(body: str) -> str:
+def _format_body(body: str, indent_unit: str) -> str:
     if not body:
         return ""
     unified = normalise_newlines(body, "\n")
@@ -192,12 +197,12 @@ def _format_body(body: str) -> str:
 
         logical = _logical_text(group)
         if _is_label(logical):
-            formatted.extend(_emit_group(group, 0))
+            formatted.extend(_emit_group(group, 0, indent_unit))
             continue
 
         before, after = _classify(logical)
         indent = max(0, indent + before)
-        formatted.extend(_emit_group(group, indent))
+        formatted.extend(_emit_group(group, indent, indent_unit))
         indent = max(0, indent + after)
 
     if not formatted:
@@ -235,22 +240,22 @@ def _logical_text(group: list[str]) -> str:
     return " ".join(parts)
 
 
-def _emit_group(group: list[str], indent: int) -> list[str]:
+def _emit_group(group: list[str], indent: int, indent_unit: str) -> list[str]:
     out: list[str] = []
     for i, phys in enumerate(group):
         extra = 1 if i > 0 else 0
-        out.append(_emit_line(phys, indent + extra, continued=i > 0))
+        out.append(_emit_line(phys, indent + extra, indent_unit, continued=i > 0))
     return out
 
 
-def _emit_line(line: str, indent: int, *, continued: bool) -> str:
+def _emit_line(line: str, indent: int, indent_unit: str, *, continued: bool) -> str:
     if not line.strip():
         return ""
     recased = _recase_line(line)
     if continued:
         trailing = recased[len(recased.rstrip()) :]
-        return INDENT * indent + recased.strip() + trailing
-    return INDENT * indent + recased.strip()
+        return indent_unit * indent + recased.strip() + trailing
+    return indent_unit * indent + recased.strip()
 
 
 def _classify(logical: str) -> tuple[int, int]:
@@ -288,11 +293,17 @@ def _classify(logical: str) -> tuple[int, int]:
         return 0, 0
 
     body = _strip_access(s)
-    if _PROC.match(body) or _PROPERTY.match(body):
-        return 0, 1
+    if _PROPERTY.match(body):
+        return (0, 0) if _contains_end_block(s, "Property") else (0, 1)
+    if _PROC.match(body):
+        kind = "Function" if re.match(r"^Function\b", body, re.IGNORECASE) else "Sub"
+        return (0, 0) if _contains_end_block(s, kind) else (0, 1)
     if _TYPE_BLOCK.match(body) or _ENUM_BLOCK.match(body):
-        return 0, 1
+        kind = "Type" if _TYPE_BLOCK.match(body) else "Enum"
+        return (0, 0) if _contains_end_block(s, kind) else (0, 1)
     if re.match(r"^If\b", s, re.IGNORECASE):
+        if _contains_end_block(s, "If"):
+            return 0, 0
         return (0, 1) if _block_then(s) else (0, 0)
     if re.match(r"^For\b", s, re.IGNORECASE):
         return 0, 1
@@ -320,6 +331,23 @@ def _block_then(s: str) -> bool:
     if idx is None:
         return True
     return s[idx + 4 :].strip() == ""
+
+
+def _contains_end_block(s: str, kind: str) -> bool:
+    """True if ``s`` contains ``End <kind>`` as keywords (not the line start-only case)."""
+    needle = kind.lower()
+    start = 0
+    while True:
+        idx = _find_keyword(s[start:], "end")
+        if idx is None:
+            return False
+        abs_idx = start + idx
+        rest = s[abs_idx + 3 :].lstrip()
+        if rest[: len(kind)].lower() == needle:
+            after = rest[len(kind) : len(kind) + 1] or " "
+            if not _is_ident_char(after):
+                return True
+        start = abs_idx + 1
 
 
 def _is_label(s: str) -> bool:
@@ -441,9 +469,11 @@ def _recase_line(line: str) -> str:
             while j < n and _is_ident_char(line[j]):
                 j += 1
             token = line[i:j]
-            out.append(_PREPROCESSOR_CASE.get(token.lower(), token))
-            i = j
-            continue
+            mapped = _PREPROCESSOR_CASE.get(token.lower())
+            if mapped is not None:
+                out.append(mapped)
+                i = j
+                continue
         if ch.isalpha() or ch == "_":
             j = i + 1
             while j < n and _is_ident_char(line[j]):
@@ -451,6 +481,14 @@ def _recase_line(line: str) -> str:
             token = line[i:j]
             out.append(_KEYWORD_CASE.get(token.lower(), token))
             i = j
+            # VBE rejects "Mid $" / "Chr $" / "Environ $"; the suffix must
+            # sit on the identifier. Glue optional space before $.
+            k = i
+            while k < n and line[k] in " \t":
+                k += 1
+            if k < n and line[k] == "$":
+                out.append("$")
+                i = k + 1
             continue
         out.append(ch)
         i += 1

@@ -8,26 +8,27 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
 
-from xlvba.core.codec import (
+from xlvbesync.core.codec import (
     DEFAULT_ANSI_ENCODING,
     convert_export_to_utf8,
     decode_ansi,
     normalise_newlines,
     write_text,
 )
-from xlvba.core.components import (
+from xlvbesync.core.components import (
     FORM_BINARY_EXT,
     ComponentRef,
     ext_for_type,
     is_document_module,
 )
-from xlvba.core.errors import (
+from xlvbesync.core.errors import (
     ProjectProtectedError,
+    TargetNotOpenError,
     VBOMAccessDeniedError,
     com_description,
     is_vbom_denied,
 )
-from xlvba.core.retry import com_retry
+from xlvbesync.core.retry import com_retry
 
 #: vbext_pp_none - project is not protected.
 VBEXT_PP_NONE = 0
@@ -40,6 +41,11 @@ def get_vbproject(workbook: Any) -> Any:
     similar-looking automation errors, but the fixes are completely different,
     so we disambiguate here rather than leaving the user guessing.
     """
+    if workbook is None:
+        raise TargetNotOpenError(
+            "Excel did not return a workbook object.",
+            "Open the workbook (or enable the add-in) and retry.",
+        )
     try:
         project = workbook.VBProject
     except Exception as exc:  # noqa: BLE001
@@ -197,7 +203,7 @@ def export_component(component: Any, destination: Path, *, ansi_encoding: str = 
     destination.parent.mkdir(parents=True, exist_ok=True)
     ext = destination.suffix
 
-    with tempfile.TemporaryDirectory(prefix="xlvba-export-") as tmpdir:
+    with tempfile.TemporaryDirectory(prefix="xlvbesync-export-") as tmpdir:
         staged = Path(tmpdir) / f"{component.Name}{ext}"
         component.Export(str(staged))
 

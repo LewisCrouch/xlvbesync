@@ -5,6 +5,7 @@
   "launch_excel": false,
   "sync_deletions": false,
   "format_on_save": true,
+  "indent": "tab",
   "ignore": [
     ".git/**",
     ".venv/**",

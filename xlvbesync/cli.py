@@ -1,26 +1,27 @@
-"""Argument parsing and entry point for the ``xlvba`` command."""
+"""Argument parsing and entry point for the ``xlvbesync`` command."""
 
 from __future__ import annotations
 
 import argparse
 import sys
 
-from xlvba import __version__, commands
-from xlvba.core import console
-from xlvba.core.config import DEFAULT_SRC_DIR, VALID_MODES
-from xlvba.core.errors import XlvbaError
+from xlvbesync import __version__, commands
+from xlvbesync.core import console
+from xlvbesync.core.config import DEFAULT_SRC_DIR, VALID_MODES
+from xlvbesync.core.errors import XlvbesyncError
 
 EPILOG = """\
 examples:
-  xlvba init --target MyBook.xlsm      create xlvba.json for a workbook
-  xlvba extract                        pull all VBA out of every target
-  xlvba extract --target Tools --prune mirror one target, deleting orphans
-  xlvba inject                         push all local source back into Excel
-  xlvba inject --file src/Tools/mod.bas  push a single module
-  xlvba watch                          hot-reload on every save
-  xlvba reload --mode swap             full add-in unload/replace/reload
-  xlvba list                           show components on both sides
-  xlvba doctor                         diagnose setup problems
+  xlvbesync init --target MyBook.xlsm      create xlvbesync.json for a workbook
+  xlvbesync extract                        pull all VBA out of every target
+  xlvbesync extract --target Tools --prune mirror one target, deleting orphans
+  xlvbesync inject                         push all local source back into Excel
+  xlvbesync inject --file src/Tools/mod.bas  push a single module
+  xlvbesync watch                          hot-reload on every save
+  xlvbesync reload --mode swap             full add-in unload/replace/reload
+  xlvbesync list                           show components on both sides
+  xlvbesync format                         pretty-print all local source files
+  xlvbesync doctor                         diagnose setup problems
 """
 
 
@@ -34,7 +35,7 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--config",
         metavar="FILE",
-        help="path to xlvba.json (default: search upwards)",
+        help="path to xlvbesync.json (default: search upwards)",
     )
     parser.add_argument(
         "-v", "--verbose", action="store_true", help="show per-file detail"
@@ -60,7 +61,7 @@ def _add_target(parser: argparse.ArgumentParser, *, help_text: str) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="xlvba",
+        prog="xlvbesync",
         description=(
             "Extract, inject and hot-reload VBA code for Excel .xlsm "
             "workbooks and .xlam add-ins."
@@ -68,13 +69,13 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--version", action="version", version=f"xlvba {__version__}")
+    parser.add_argument("--version", action="version", version=f"xlvbesync {__version__}")
 
     sub = parser.add_subparsers(dest="command", metavar="<command>")
 
     # -- init -------------------------------------------------------------
     p_init = sub.add_parser(
-        "init", help="create xlvba.json for one or more Excel files"
+        "init", help="create xlvbesync.json for one or more Excel files"
     )
     _add_common(p_init)
     p_init.add_argument(
@@ -87,10 +88,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--src-dir", metavar="DIR", help=f"source root (default: {DEFAULT_SRC_DIR})"
     )
     p_init.add_argument(
-        "--mode", choices=VALID_MODES, help="default reload mode (default: live)"
+        "--mode",
+        choices=VALID_MODES,
+        help="default reload mode (default: swap for add-ins, live for workbooks)",
     )
     p_init.add_argument(
-        "--force", action="store_true", help="overwrite an existing xlvba.json"
+        "--force", action="store_true", help="overwrite an existing xlvbesync.json"
     )
     p_init.set_defaults(func=commands.cmd_init)
 
@@ -195,6 +198,14 @@ def build_parser() -> argparse.ArgumentParser:
     _add_target(p_ls, help_text="target name or file (default: all targets)")
     p_ls.set_defaults(func=commands.cmd_list)
 
+    # -- format -----------------------------------------------------------
+    p_fmt = sub.add_parser(
+        "format", help="pretty-print local VBA source using xlvbesync.json indent"
+    )
+    _add_common(p_fmt)
+    _add_target(p_fmt, help_text="target name or file (default: all targets)")
+    p_fmt.set_defaults(func=commands.cmd_format)
+
     # -- doctor -----------------------------------------------------------
     p_dr = sub.add_parser("doctor", help="check prerequisites and diagnose problems")
     _add_common(p_dr)
@@ -220,7 +231,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         return int(args.func(args))
-    except XlvbaError as exc:
+    except XlvbesyncError as exc:
         console.error(str(exc))
         return 2
     except KeyboardInterrupt:

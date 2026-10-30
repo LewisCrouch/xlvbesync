@@ -6,17 +6,18 @@ import contextlib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from xlvba.core import console
-from xlvba.core.components import FORM_BINARY_EXT, is_source_file
-from xlvba.core.state import SyncState, hash_text
-from xlvba.core.vbproject import document_module_map, export_any, list_components
-from xlvba.ops.inject import (
+from xlvbesync.core import console
+from xlvbesync.core.components import FORM_BINARY_EXT, is_source_file
+from xlvbesync.core.customui import extract_customui
+from xlvbesync.core.state import SyncState, hash_text
+from xlvbesync.core.vbproject import document_module_map, export_any, list_components
+from xlvbesync.ops.inject import (
     InjectReport,
     inject_target,
     print_report as print_inject,
     shared_sources,
 )
-from xlvba.ops.session import TargetSession
+from xlvbesync.ops.session import TargetSession
 
 
 @dataclass
@@ -145,7 +146,7 @@ def extract_target(
         if info.ref.ext == ".frm" and state is not None:
             frx = dest.with_suffix(FORM_BINARY_EXT)
             if frx.is_file():
-                from xlvba.core.state import hash_file
+                from xlvbesync.core.state import hash_file
 
                 state.record(
                     session.name, frx.relative_to(session.config.src_root), hash_file(frx)
@@ -169,6 +170,10 @@ def extract_target(
         report.pushed = inject_target(
             session, state=state, only=list(shared.values()), force=True
         )
+
+    if not dry_run and session.path.is_file():
+        cui_files = extract_customui(session.path, session.src_dir)
+        report.written.extend(cui_files)
 
     return report
 

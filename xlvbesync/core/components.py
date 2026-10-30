@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from xlvba.core.errors import ComponentTypeError
+from xlvbesync.core.errors import ComponentTypeError
 
 # ---------------------------------------------------------------------------
 # vbext_ComponentType constants (from the VBIDE type library)

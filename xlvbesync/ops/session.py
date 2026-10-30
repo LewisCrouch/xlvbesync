@@ -13,17 +13,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
 
-from xlvba.core import console
-from xlvba.core.addin import is_addin
-from xlvba.core.config import ProjectConfig, TargetConfig
-from xlvba.core.errors import TargetNotFoundError
-from xlvba.core.excel import (
+from xlvbesync.core import console
+from xlvbesync.core.addin import is_addin
+from xlvbesync.core.config import ProjectConfig, TargetConfig
+from xlvbesync.core.errors import TargetNotFoundError
+from xlvbesync.core.excel import (
     ensure_workbook,
     find_workbook,
     get_excel_for,
     quiet_excel,
+    same_path,
 )
-from xlvba.core.vbproject import get_vbproject
+from xlvbesync.core.vbproject import get_vbproject
 
 
 @dataclass
@@ -59,12 +60,27 @@ class TargetSession:
         """Save the workbook so the on-disk file matches the loaded project."""
         try:
             self.workbook.Save()
-            return True
         except Exception as exc:  # noqa: BLE001
             console.warn(
                 f"Could not save {self.path.name}: {console.describe_exception(exc)}"
             )
             return False
+
+        # If the loaded workbook is in a different location than self.path
+        # (e.g. an add-in loaded from %AppData%\Microsoft\AddIns), sync the
+        # saved file back to the configured target path.
+        try:
+            loaded = Path(self.workbook.FullName)
+            if not same_path(loaded, self.path):
+                import shutil
+
+                shutil.copy2(loaded, self.path)
+        except Exception as exc:  # noqa: BLE001
+            console.warn(
+                f"Could not sync saved file to {self.path}: {console.describe_exception(exc)}"
+            )
+
+        return True
 
 
 @contextlib.contextmanager
@@ -96,7 +112,7 @@ def open_target(
     if not path.is_file():
         raise TargetNotFoundError(
             f"Target file not found: {path}",
-            "Check the 'path' entry in xlvba.json, or pass --target.",
+            "Check the 'path' entry in xlvbesync.json, or pass --target.",
         )
 
     started_excel = False
@@ -112,13 +128,23 @@ def open_target(
 
     if workbook is None:
         if require_open:
-            from xlvba.core.errors import TargetNotOpenError
+            from xlvbesync.core.errors import TargetNotOpenError
 
             raise TargetNotOpenError(
                 f"{path.name} is not currently open in Excel.",
                 "Open the workbook (or install the add-in) and retry.",
             )
         workbook, opened_by_us = ensure_workbook(app, path, read_only=read_only)
+
+    try:
+        loaded = str(workbook.FullName)
+    except Exception:  # noqa: BLE001
+        loaded = ""
+    if loaded and not same_path(loaded, path):
+        console.warn(
+            f"{path.name} is loaded from {loaded}, not {path}; "
+            "injecting into the loaded copy."
+        )
 
     project = get_vbproject(workbook)
 

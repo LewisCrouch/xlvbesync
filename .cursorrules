@@ -1,4 +1,4 @@
-# Cursor rules for xlvba (Excel VBA tooling over win32com)
+# Cursor rules for xlvbesync (Excel VBA tooling over win32com)
 
 This project automates Excel through COM to extract, inject and hot-reload VBA
 in `.xlsm` workbooks and `.xlam` add-ins. It is Windows-only by nature.
@@ -9,12 +9,12 @@ real failure.
 
 ## Architecture: where code belongs
 
-- `xlvba/core/` is the only layer allowed to talk to COM.
-- `xlvba/ops/` composes core operations into user-level actions.
-- `xlvba/commands.py` + `cli.py` do argument handling and printing only.
+- `xlvbesync/core/` is the only layer allowed to talk to COM.
+- `xlvbesync/ops/` composes core operations into user-level actions.
+- `xlvbesync/commands.py` + `cli.py` do argument handling and printing only.
 - Never call `win32com.client` directly from `ops/` or `commands.py`. Add a
   helper to `core/excel.py` instead.
-- Never `print()`. Use `xlvba.core.console` (`info`/`warn`/`error`/`detail`),
+- Never `print()`. Use `xlvbesync.core.console` (`info`/`warn`/`error`/`detail`),
   which sanitises output for legacy consoles. A bare `print` of a non-cp1252
   character raises `UnicodeEncodeError` *inside print* and aborts a sync.
 
@@ -89,14 +89,14 @@ When changing an add-in file on disk, follow this order exactly:
 1. Inject into a **staged copy**, never the live add-in. Injecting into the
    live one and then swapping makes the subsequent save overwrite the change.
 2. Name the staging file so the real extension is **last**:
-   `Name.xlvba-stage.xlam`. Excel refuses to open a file whose extension it
+   `Name.xlvbesync-stage.xlam`. Excel refuses to open a file whose extension it
    does not recognise.
 3. Uninstall from **every** Excel instance (`unload_addin` does this). An
    add-in loaded in another process keeps the file locked regardless.
 4. Poll until the handle actually drops (`wait_for_unlock`). `Installed = False`
    returns *before* Excel has released the file. Never use a fixed `sleep`.
 5. Replace with `os.replace` (atomic) after copying to a sibling temp file.
-   Keep a `.xlvba-bak` rollback copy.
+   Keep a `.xlvbesync-bak` rollback copy.
 6. Reinstall in each instance that had it (`reload_hosts`), inside a `finally`
    so a mid-swap exception cannot leave the user without their add-in.
 
@@ -118,7 +118,7 @@ Additional traps:
 
 This is a hard requirement; do not shortcut it.
 
-- **Every file xlvba reads or writes on disk is UTF-8, no BOM, CRLF endings.**
+- **Every file xlvbesync reads or writes on disk is UTF-8, no BOM, CRLF endings.**
 - `VBComponent.Export` writes the host ANSI code page (cp1252 on Western
   installs) and `VBComponents.Import` expects the same. So:
   - export: `Export` to a temp file, decode ANSI, rewrite as UTF-8
@@ -177,7 +177,7 @@ This is a hard requirement; do not shortcut it.
 - Verify persistence by closing and reopening the file from disk.
 - Clean up: uninstall test add-ins in a `finally`. Leaving one flagged
   installed makes it auto-load in the user's real Excel sessions.
-- Assert no `.xlvba-stage`/`.xlvba-tmp`/`.xlvba-bak` files remain.
+- Assert no `.xlvbesync-stage`/`.xlvbesync-tmp`/`.xlvbesync-bak` files remain.
 - Do not kill `EXCEL.EXE` processes in tests; a real user session may be open.
 
 ## Python conventions

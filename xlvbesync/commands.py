@@ -5,23 +5,25 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from xlvba.core import console
-from xlvba.core.config import (
+from xlvbesync.core import console
+from xlvbesync.core.components import is_source_file
+from xlvbesync.core.config import (
     CONFIG_FILENAME,
     DEFAULT_SRC_DIR,
     ProjectConfig,
     TargetConfig,
     load_config,
 )
-from xlvba.core.errors import ConfigError
-from xlvba.core.state import SyncState
-from xlvba.core.vbproject import document_module_map, list_components
-from xlvba.ops import doctor as doctor_ops
-from xlvba.ops.extract import extract_target, print_report as print_extract
-from xlvba.ops.init import init_project
-from xlvba.ops.inject import discover_sources, inject_target, print_report as print_inject
-from xlvba.ops.reload import print_reload, reload_target
-from xlvba.ops.session import open_target, resolve_targets
+from xlvbesync.core.errors import ConfigError
+from xlvbesync.core.format import format_source_file
+from xlvbesync.core.state import SyncState
+from xlvbesync.core.vbproject import document_module_map, list_components
+from xlvbesync.ops import doctor as doctor_ops
+from xlvbesync.ops.extract import extract_target, print_report as print_extract
+from xlvbesync.ops.init import init_project
+from xlvbesync.ops.inject import discover_sources, inject_target, print_report as print_inject
+from xlvbesync.ops.reload import print_reload, reload_target
+from xlvbesync.ops.session import open_target, resolve_targets
 
 
 def _load(args: argparse.Namespace) -> ProjectConfig:
@@ -29,7 +31,7 @@ def _load(args: argparse.Namespace) -> ProjectConfig:
     root = Path(args.root).resolve() if getattr(args, "root", None) else Path.cwd()
     explicit = Path(args.config).resolve() if getattr(args, "config", None) else None
 
-    # An explicit file path as --target lets you skip xlvba.json entirely.
+    # An explicit file path as --target lets you skip xlvbesync.json entirely.
     raw_target = getattr(args, "target", None)
     if raw_target and _looks_like_path(raw_target):
         path = Path(raw_target)
@@ -95,7 +97,7 @@ def cmd_init(args: argparse.Namespace) -> int:
         root,
         list(args.target or []),
         src_dir=args.src_dir or DEFAULT_SRC_DIR,
-        mode=args.mode or "live",
+        mode=args.mode,
         force=args.force,
     )
     return 0
@@ -198,7 +200,7 @@ def cmd_reload(args: argparse.Namespace) -> int:
 
 
 def cmd_watch(args: argparse.Namespace) -> int:
-    from xlvba.watch import watch
+    from xlvbesync.watch import watch
 
     cfg = _load(args)
     if args.debounce is not None:
@@ -269,6 +271,38 @@ def cmd_list(args: argparse.Namespace) -> int:
             or "  (no components)"
         )
 
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# format
+# ---------------------------------------------------------------------------
+
+
+def cmd_format(args: argparse.Namespace) -> int:
+    """Pretty-print local source files using the project's indent setting."""
+    cfg = _load(args)
+    seen: set[Path] = set()
+    changed = 0
+    total = 0
+
+    for target in _selected(args, cfg):
+        for folder in cfg.source_dirs(target):
+            if not folder.is_dir():
+                continue
+            for path in folder.rglob("*"):
+                if not path.is_file() or not is_source_file(path):
+                    continue
+                key = path.resolve()
+                if key in seen:
+                    continue
+                seen.add(key)
+                total += 1
+                if format_source_file(path, indent=cfg.indent):
+                    changed += 1
+                    console.detail(str(path.relative_to(cfg.root)))
+
+    console.info(f"formatted {changed} of {total} files")
     return 0
 
 

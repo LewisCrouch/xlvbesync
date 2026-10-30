@@ -28,14 +28,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from xlvba.core.errors import FileLockedError, XlvbaError, com_description
-from xlvba.core.excel import (
+from xlvbesync.core.errors import FileLockedError, XlvbesyncError, com_description
+from xlvbesync.core.excel import (
     find_workbook,
     find_workbook_by_name,
     lookup_workbook,
     same_path,
 )
-from xlvba.core.retry import com_retry, wait_until
+from xlvbesync.core.retry import com_retry, wait_until
 
 #: How long to wait for Excel to release its handle on the .xlam.
 DEFAULT_UNLOCK_TIMEOUT = 15.0
@@ -94,6 +94,7 @@ class AddinHandle:
     com: Any
     name: str
     was_installed: bool
+    path: Path | None = None
 
 
 def find_addin(app: Any, path: Path) -> AddinHandle | None:
@@ -133,11 +134,17 @@ def find_addin(app: Any, path: Path) -> AddinHandle | None:
         except Exception:  # noqa: BLE001
             entry_name = ""
 
+        entry_path = Path(full) if full else None
+
         if full and same_path(full, path):
-            return AddinHandle(entry, entry_name or path.name, installed)
+            return AddinHandle(
+                entry, entry_name or path.name, installed, path=entry_path or path
+            )
 
         if entry_name.casefold() == filename and fallback is None:
-            fallback = AddinHandle(entry, entry_name, installed)
+            fallback = AddinHandle(
+                entry, entry_name, installed, path=entry_path
+            )
 
     return fallback
 
@@ -153,15 +160,21 @@ def is_loaded(app: Any, path: Path) -> bool:
 
     Note that a loaded add-in does not appear in ``Workbooks`` iteration, so
     this relies on the by-name indexer (see
-    :func:`xlvba.core.excel.lookup_workbook`).
+    :func:`xlvbesync.core.excel.lookup_workbook`).
     """
     wb = find_workbook_by_name(app, path.name)
     if wb is None:
         return False
     try:
-        return same_path(wb.FullName, path)
+        if same_path(wb.FullName, path):
+            return True
+        # Add-ins may be loaded from an alternate installed location (e.g.
+        # %AppData%\Microsoft\AddIns) while configured via a repo path.
+        if Path(wb.FullName).name.casefold() == path.name.casefold():
+            return True
     except Exception:  # noqa: BLE001
         return False
+    return False
 
 
 def force_install(app: Any, path: Path, *, timeout: float = DEFAULT_RELOAD_TIMEOUT) -> bool:
@@ -212,7 +225,7 @@ def ensure_addin_entry(app: Any, path: Path) -> AddinHandle:
     register_addin(app, path)
     handle = find_addin(app, path)
     if handle is None:
-        raise XlvbaError(
+        raise XlvbesyncError(
             f"Could not register {path.name} in Excel's add-ins collection.",
             "Install it manually once via File > Options > Add-ins > Browse, "
             "then retry.",
@@ -255,7 +268,7 @@ def unload_from_instance(app: Any, path: Path) -> AddinHandle | None:
         try:
             set_installed(handle, False)
         except Exception as exc:  # noqa: BLE001
-            raise XlvbaError(
+            raise XlvbesyncError(
                 f"Could not uninstall add-in {path.name}: {com_description(exc)}",
                 "Check the add-in's Workbook_AddinUninstall handler for errors.",
             ) from exc
@@ -282,7 +295,7 @@ def unload_addin(
     instance keeps the file locked no matter what we do to the first. We
     therefore uninstall everywhere before touching the file.
     """
-    from xlvba.core.excel import all_excel_instances, app_key
+    from xlvbesync.core.excel import all_excel_instances, app_key
 
     if all_instances:
         instances = all_excel_instances()
@@ -297,24 +310,32 @@ def unload_addin(
     for instance in instances:
         try:
             hosts.append((instance, unload_from_instance(instance, path)))
-        except XlvbaError:
+        except XlvbesyncError:
             raise
         except Exception:  # noqa: BLE001 - instance died mid-call
             continue
 
-    if not wait_for_unlock(path, timeout):
-        holder = _excel_owner_file(path)
-        hint = (
-            f" An Excel owner file is still present ({holder.name})."
-            if holder.exists()
-            else ""
-        )
-        raise FileLockedError(
-            f"{path.name} is still locked {timeout:.0f}s after unloading it from "
-            f"{len(hosts)} Excel instance(s).{hint}",
-            "Close any Excel window showing this file, make sure no macro from "
-            "it is running, then retry. If it persists, close Excel entirely.",
-        )
+    # Wait for both the target path and any installed add-in path (e.g.
+    # %AppData%\Microsoft\AddIns) to drop their file locks.
+    paths_to_unlock = {path}
+    for _, h in hosts:
+        if h is not None and h.path is not None:
+            paths_to_unlock.add(h.path)
+
+    for p in paths_to_unlock:
+        if not wait_for_unlock(p, timeout):
+            holder = _excel_owner_file(p)
+            hint = (
+                f" An Excel owner file is still present ({holder.name})."
+                if holder.exists()
+                else ""
+            )
+            raise FileLockedError(
+                f"{p.name} is still locked {timeout:.0f}s after unloading it from "
+                f"{len(hosts)} Excel instance(s).{hint}",
+                "Close any Excel window showing this file, make sure no macro from "
+                "it is running, then retry. If it persists, close Excel entirely.",
+            )
 
     return hosts
 
@@ -336,6 +357,8 @@ def reload_addin(
         return
 
     fresh = find_addin(app, path)
+    if fresh is None and handle is not None and handle.path is not None:
+        fresh = find_addin(app, handle.path)
     if fresh is None:
         fresh = ensure_addin_entry(app, path)
 
@@ -360,7 +383,7 @@ def reload_addin(
     try:
         set_installed(fresh, True)
     except Exception as exc:  # noqa: BLE001
-        raise XlvbaError(
+        raise XlvbesyncError(
             f"Replaced {path.name} on disk but could not re-enable it: "
             f"{com_description(exc)}",
             "Re-tick it under File > Options > Add-ins > Excel Add-ins > Go.",
@@ -369,7 +392,7 @@ def reload_addin(
     if not wait_until(loaded, timeout, interval=0.2):
         # The flag is set but Excel never opened it. Surface this rather than
         # pretending the reload succeeded.
-        raise XlvbaError(
+        raise XlvbesyncError(
             f"{path.name} is marked installed but Excel did not load it.",
             "Check the add-in's Workbook_Open / Workbook_AddinInstall handlers "
             "for a runtime error, then reload manually.",
@@ -400,7 +423,7 @@ def reload_hosts(
             errors.append(com_description(exc))
 
     if errors and restored == 0:
-        raise XlvbaError(
+        raise XlvbesyncError(
             f"Replaced {path.name} but could not re-enable it: {errors[0]}",
             "Re-tick it under File > Options > Add-ins > Excel Add-ins > Go.",
         )
@@ -421,13 +444,13 @@ def replace_file(source: Path, destination: Path, *, keep_backup: bool = True) -
     """
     backup: Path | None = None
     if keep_backup and destination.exists():
-        backup = destination.with_suffix(destination.suffix + ".xlvba-bak")
+        backup = destination.with_suffix(destination.suffix + ".xlvbesync-bak")
         with contextlib.suppress(OSError):
             backup.unlink()
         shutil.copy2(destination, backup)
 
     try:
-        staged = destination.with_suffix(destination.suffix + ".xlvba-tmp")
+        staged = destination.with_suffix(destination.suffix + ".xlvbesync-tmp")
         with contextlib.suppress(OSError):
             staged.unlink()
         shutil.copy2(source, staged)

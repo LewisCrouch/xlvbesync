@@ -1,6 +1,6 @@
 """Pre-flight diagnostics.
 
-``xlvba doctor`` answers the question "why isn't this working?" before the
+``xlvbesync doctor`` answers the question "why isn't this working?" before the
 user has to guess. Every check reports pass/fail/warn plus a concrete fix.
 """
 
@@ -10,11 +10,11 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from xlvba.core import console
-from xlvba.core.addin import is_addin, is_file_locked
-from xlvba.core.codec import system_ansi_encoding
-from xlvba.core.config import ProjectConfig
-from xlvba.core.errors import XlvbaError
+from xlvbesync.core import console
+from xlvbesync.core.addin import is_addin, is_file_locked
+from xlvbesync.core.codec import system_ansi_encoding
+from xlvbesync.core.config import ProjectConfig
+from xlvbesync.core.errors import XlvbesyncError
 
 OK = "ok"
 WARN = "warn"
@@ -37,7 +37,7 @@ def check_platform() -> Check:
             "Platform",
             FAIL,
             f"{sys.platform} is not supported",
-            "xlvba drives Excel through Windows COM and requires Windows.",
+            "xlvbesync drives Excel through Windows COM and requires Windows.",
         )
     return Check("Platform", OK, f"Windows, Python {sys.version.split()[0]}")
 
@@ -74,7 +74,7 @@ def check_watchdog() -> Check:
                 "watchdog",
                 WARN,
                 str(exc),
-                "pip install watchdog (only needed for `xlvba watch`).",
+                "pip install watchdog (only needed for `xlvbesync watch`).",
             )
 
 
@@ -134,8 +134,8 @@ def check_vbom_registry() -> Check:
 
 
 def check_excel_running() -> tuple[Check, object | None]:
-    from xlvba.core.errors import ExcelNotRunningError
-    from xlvba.core.excel import attach_excel
+    from xlvbesync.core.errors import ExcelNotRunningError
+    from xlvbesync.core.excel import attach_excel
 
     try:
         app = attach_excel()
@@ -145,7 +145,7 @@ def check_excel_running() -> tuple[Check, object | None]:
                 "Excel instance",
                 WARN,
                 "not running",
-                "Start Excel, or pass --launch to let xlvba open it.",
+                "Start Excel, or pass --launch to let xlvbesync open it.",
             ),
             None,
         )
@@ -166,9 +166,9 @@ def check_vbom_live(app: object | None) -> Check:
     if app is None:
         return Check("VBProject access (live)", WARN, "skipped, Excel not running")
 
-    from xlvba.core.errors import VBOMAccessDeniedError, com_description, is_vbom_denied
-    from xlvba.core.excel import iter_workbooks
-    from xlvba.core.vbproject import get_vbproject
+    from xlvbesync.core.errors import VBOMAccessDeniedError, com_description, is_vbom_denied
+    from xlvbesync.core.excel import iter_workbooks
+    from xlvbesync.core.vbproject import get_vbproject
 
     for wb in iter_workbooks(app):  # type: ignore[arg-type]
         try:
@@ -215,14 +215,14 @@ def check_targets(config: ProjectConfig | None, app: object | None) -> list[Chec
             Check(
                 "Project config",
                 WARN,
-                "no xlvba.json found",
-                "Run `xlvba init --target <file.xlsm>` to create one.",
+                "no xlvbesync.json found",
+                "Run `xlvbesync init --target <file.xlsm>` to create one.",
             )
         ]
 
     checks = [Check("Project config", OK, f"{len(config.targets)} target(s)")]
 
-    from xlvba.core.excel import find_workbook
+    from xlvbesync.core.excel import find_workbook
 
     for target in config.targets:
         path = config.target_path(target)
@@ -230,7 +230,7 @@ def check_targets(config: ProjectConfig | None, app: object | None) -> list[Chec
 
         if not path.is_file():
             checks.append(
-                Check(label, FAIL, f"missing: {path}", "Fix 'path' in xlvba.json.")
+                Check(label, FAIL, f"missing: {path}", "Fix 'path' in xlvbesync.json.")
             )
             continue
 

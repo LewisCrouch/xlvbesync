@@ -11,7 +11,7 @@ an STA server; calling it concurrently from several watchdog threads is a
 reliable way to get "Call was rejected by callee" or worse. The worker owns its
 own COM apartment.
 
-*Idempotence*: content hashes (see :mod:`xlvba.core.state`) mean an editor that
+*Idempotence*: content hashes (see :mod:`xlvbesync.core.state`) mean an editor that
 rewrites a file without changing it costs nothing.
 """
 
@@ -30,16 +30,17 @@ from watchdog.events import (
 )
 from watchdog.observers import Observer
 
-from xlvba.core import console
-from xlvba.core.components import FORM_BINARY_EXT, is_source_file
-from xlvba.core.config import MODE_SWAP, ProjectConfig, TargetConfig
-from xlvba.core.errors import XlvbaError
-from xlvba.core.excel import com_apartment
-from xlvba.core.format import format_source_file
-from xlvba.core.state import SyncState
-from xlvba.ops.inject import inject_target, remove_source
-from xlvba.ops.reload import reload_target
-from xlvba.ops.session import open_target
+from xlvbesync.core import console
+from xlvbesync.core.components import FORM_BINARY_EXT, is_source_file
+from xlvbesync.core.config import MODE_SWAP, ProjectConfig, TargetConfig
+from xlvbesync.core.customui import is_customui_file
+from xlvbesync.core.errors import XlvbesyncError
+from xlvbesync.core.excel import com_apartment
+from xlvbesync.core.format import format_source_file
+from xlvbesync.core.state import SyncState
+from xlvbesync.ops.inject import inject_target, remove_source
+from xlvbesync.ops.reload import reload_target
+from xlvbesync.ops.session import open_target
 
 #: Event kinds we care about.
 CHANGE = "change"
@@ -76,7 +77,7 @@ class SourceEventHandler(FileSystemEventHandler):
             frm = path.with_suffix(".frm")
             return frm if frm.is_file() else None
 
-        if not is_source_file(path):
+        if not is_source_file(path) and not is_customui_file(path):
             return None
 
         if self.config.target_for_source(path) is None:
@@ -136,7 +137,7 @@ class SyncWorker:
     # -- lifecycle --------------------------------------------------------
 
     def start(self) -> None:
-        self._thread = threading.Thread(target=self._run, name="xlvba-sync", daemon=True)
+        self._thread = threading.Thread(target=self._run, name="xlvbesync-sync", daemon=True)
         self._thread.start()
 
     def stop(self) -> None:
@@ -199,7 +200,7 @@ class SyncWorker:
         for key, (target, changed, deleted) in by_target.items():
             try:
                 self._sync_target(target, changed, deleted)
-            except XlvbaError as exc:
+            except XlvbesyncError as exc:
                 console.error(f"{key}: {exc}")
             except Exception as exc:  # noqa: BLE001 - watcher must survive
                 console.error(f"{key}: {console.describe_exception(exc)}")
@@ -220,32 +221,37 @@ class SyncWorker:
             self._format_sources(changed)
 
         effective_mode = self.mode or target.mode
+        has_customui = any(is_customui_file(p) for p in changed + deleted)
 
         # Swap mode rebuilds the whole file, so per-file granularity is moot.
-        if effective_mode == MODE_SWAP:
+        # CustomUI changes cannot be injected live via COM, so they require swap.
+        if effective_mode == MODE_SWAP or has_customui:
             report = reload_target(
                 self.config, target, mode=MODE_SWAP, state=self.state
             )
-            from xlvba.ops.reload import print_reload
+            from xlvbesync.ops.reload import print_reload
 
             print_reload(report, verbose=self.verbose)
             return
 
         with open_target(self.config, target, quiet=True) as session:
-            if deleted and self.config.sync_deletions:
-                for path in deleted:
+            vba_deleted = [p for p in deleted if is_source_file(p)]
+            vba_changed = [p for p in changed if is_source_file(p)]
+
+            if vba_deleted and self.config.sync_deletions:
+                for path in vba_deleted:
                     result = remove_source(session, path, state=self.state)
                     console.detail(str(result))
-            elif deleted:
-                for path in deleted:
+            elif vba_deleted:
+                for path in vba_deleted:
                     console.detail(
                         f"ignored deletion of {path.name} "
                         "(set sync_deletions=true to mirror deletions)"
                     )
 
-            if changed:
-                report = inject_target(session, state=self.state, only=changed)
-                from xlvba.ops.inject import print_report
+            if vba_changed:
+                report = inject_target(session, state=self.state, only=vba_changed)
+                from xlvbesync.ops.inject import print_report
 
                 print_report(report, verbose=self.verbose)
 
@@ -254,7 +260,7 @@ class SyncWorker:
             if not path.is_file() or not is_source_file(path):
                 continue
             try:
-                if format_source_file(path):
+                if format_source_file(path, indent=self.config.indent):
                     console.detail(f"formatted {path.name}")
             except OSError as exc:
                 console.warn(f"could not format {path.name}: {exc}")

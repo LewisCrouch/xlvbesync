@@ -5,19 +5,19 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from xlvba.core import console
-from xlvba.core.codec import read_text
-from xlvba.core.components import (
+from xlvbesync.core import console
+from xlvbesync.core.codec import read_text
+from xlvbesync.core.components import (
     FORM_BINARY_EXT,
     ComponentRef,
     is_source_file,
 )
-from xlvba.core.errors import XlvbaError
-from xlvba.core.excel import same_path
-from xlvba.core.mutate import InjectionResult, inject_component, remove_component
-from xlvba.core.state import SyncState, hash_file, hash_text
-from xlvba.core.vbproject import list_components
-from xlvba.ops.session import TargetSession
+from xlvbesync.core.errors import XlvbesyncError
+from xlvbesync.core.excel import same_path
+from xlvbesync.core.mutate import InjectionResult, inject_component, remove_component
+from xlvbesync.core.state import SyncState, hash_file, hash_text
+from xlvbesync.core.vbproject import list_components
+from xlvbesync.ops.session import TargetSession
 
 
 @dataclass
@@ -187,7 +187,7 @@ def inject_target(
 
     Newly created local files are detected implicitly: any file present locally
     but absent from the VBProject is *created* by
-    :func:`xlvba.core.mutate.inject_component`.
+    :func:`xlvbesync.core.mutate.inject_component`.
     """
     report = InjectReport(target=session.name)
     files = sort_sources(only) if only is not None else discover_sources(session)
@@ -203,7 +203,7 @@ def inject_target(
             continue
         try:
             report.results.append(inject_file(session, path, state=state, force=force))
-        except XlvbaError as exc:
+        except XlvbesyncError as exc:
             report.failures.append((path.name, str(exc)))
         except Exception as exc:  # noqa: BLE001
             report.failures.append((path.name, console.describe_exception(exc)))

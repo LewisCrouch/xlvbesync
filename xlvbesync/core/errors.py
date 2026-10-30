@@ -1,6 +1,6 @@
-"""Exception hierarchy and COM HRESULT decoding for xlvba.
+"""Exception hierarchy and COM HRESULT decoding for xlvbesync.
 
-Every failure that a user can plausibly fix is surfaced as an XlvbaError
+Every failure that a user can plausibly fix is surfaced as an XlvbesyncError
 subclass carrying a human-readable remedy, rather than a raw pywin32
 `com_error` tuple which is close to unreadable.
 """
@@ -52,8 +52,8 @@ VBOM_DENIED_HRESULTS = frozenset(
 )
 
 
-class XlvbaError(Exception):
-    """Base class for all xlvba failures.
+class XlvbesyncError(Exception):
+    """Base class for all xlvbesync failures.
 
     Parameters
     ----------
@@ -74,40 +74,40 @@ class XlvbaError(Exception):
         return self.message
 
 
-class ExcelNotRunningError(XlvbaError):
+class ExcelNotRunningError(XlvbesyncError):
     """No Excel instance could be attached to or started."""
 
 
-class VBOMAccessDeniedError(XlvbaError):
+class VBOMAccessDeniedError(XlvbesyncError):
     """Excel refused programmatic access to the VBA project object model."""
 
     DEFAULT_REMEDY = (
         "Enable Excel > File > Options > Trust Center > Trust Center Settings > "
         "Macro Settings > 'Trust access to the VBA project object model', then "
-        "fully restart Excel. Run `xlvba doctor` to verify."
+        "fully restart Excel. Run `xlvbesync doctor` to verify."
     )
 
     def __init__(self, message: str, remedy: str | None = None) -> None:
         super().__init__(message, remedy or self.DEFAULT_REMEDY)
 
 
-class TargetNotFoundError(XlvbaError):
+class TargetNotFoundError(XlvbesyncError):
     """The configured .xlsm/.xlam target does not exist on disk."""
 
 
-class TargetNotOpenError(XlvbaError):
+class TargetNotOpenError(XlvbesyncError):
     """The target workbook/add-in is not currently open in Excel."""
 
 
-class ComponentTypeError(XlvbaError):
+class ComponentTypeError(XlvbesyncError):
     """A file extension or VBComponent type is unsupported."""
 
 
-class FileLockedError(XlvbaError):
+class FileLockedError(XlvbesyncError):
     """A file could not be replaced because Excel still holds a handle."""
 
 
-class VbeBusyError(XlvbaError):
+class VbeBusyError(XlvbesyncError):
     """The VBE is in break mode or VBA code is currently executing."""
 
     DEFAULT_REMEDY = (
@@ -119,7 +119,7 @@ class VbeBusyError(XlvbaError):
         super().__init__(message, remedy or self.DEFAULT_REMEDY)
 
 
-class ProjectProtectedError(XlvbaError):
+class ProjectProtectedError(XlvbesyncError):
     """The VBProject is locked for viewing (password protected)."""
 
     DEFAULT_REMEDY = (
@@ -131,8 +131,8 @@ class ProjectProtectedError(XlvbaError):
         super().__init__(message, remedy or self.DEFAULT_REMEDY)
 
 
-class ConfigError(XlvbaError):
-    """xlvba.json is missing, malformed, or internally inconsistent."""
+class ConfigError(XlvbesyncError):
+    """xlvbesync.json is missing, malformed, or internally inconsistent."""
 
 
 def hresult_of(exc: BaseException) -> int | None:

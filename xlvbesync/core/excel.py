@@ -23,13 +23,14 @@ from typing import Any, Iterator
 import pythoncom
 import win32com.client
 
-from xlvba.core.errors import (
+from xlvbesync.core.errors import (
     ExcelNotRunningError,
+    TargetNotOpenError,
     VBOMAccessDeniedError,
     com_description,
     is_vbom_denied,
 )
-from xlvba.core.retry import com_retry, wait_until
+from xlvbesync.core.retry import com_retry, wait_until
 
 EXCEL_PROGID = "Excel.Application"
 
@@ -68,7 +69,7 @@ def message_filter() -> Iterator[None]:
 
     Without this, a call arriving while Excel is busy is rejected outright.
     With it, COM retries transparently for a short window. We still keep
-    :func:`xlvba.core.retry.com_retry` as a second line of defence.
+    :func:`xlvbesync.core.retry.com_retry` as a second line of defence.
     """
     installed = False
     try:
@@ -103,7 +104,7 @@ def attach_excel() -> Any:
         raise ExcelNotRunningError(
             "No running Excel instance found.",
             "Open Excel (with your workbook or add-in loaded) and retry, or "
-            "pass --launch to let xlvba start Excel itself.",
+            "pass --launch to let xlvbesync start Excel itself.",
         ) from exc
 
 
@@ -275,11 +276,39 @@ def quiet_excel(app: Any, *, enabled: bool = True) -> Iterator[None]:
 def same_path(a: str | os.PathLike[str], b: str | os.PathLike[str]) -> bool:
     """Case-insensitive path comparison suitable for Windows."""
     try:
-        return os.path.normcase(os.path.abspath(str(a))) == os.path.normcase(
+        if os.path.normcase(os.path.abspath(str(a))) == os.path.normcase(
             os.path.abspath(str(b))
-        )
+        ):
+            return True
     except Exception:  # noqa: BLE001
-        return False
+        pass
+    try:
+        pa, pb = Path(a), Path(b)
+        if pa.exists() and pb.exists():
+            return os.path.samefile(pa, pb)
+    except Exception:  # noqa: BLE001
+        pass
+    return False
+
+
+def is_addin_path(path: Path | str) -> bool:
+    """True if ``path`` has an Excel add-in extension."""
+    return Path(path).suffix.lower() in (".xlam", ".xla")
+
+
+def workbook_or_none(workbook: Any) -> Any | None:
+    """Return ``workbook`` only if it is a live Excel Workbook COM object.
+
+    ``Workbooks.Open`` of an already-loaded add-in can yield ``None`` / Empty
+    without raising, which previously became ``None.VBProject``.
+    """
+    if workbook is None:
+        return None
+    try:
+        _ = workbook.Name
+    except Exception:  # noqa: BLE001 - Empty, disconnected, or not a Workbook
+        return None
+    return workbook
 
 
 def iter_workbooks(app: Any) -> Iterator[Any]:
@@ -308,14 +337,40 @@ def lookup_workbook(app: Any, name: str) -> Any | None:
     ``Workbooks("Name.xlam")`` resolves it perfectly well. Iterating alone
     would make us conclude an installed add-in was closed.
     """
-    try:
-        return app.Workbooks(name)
-    except Exception:  # noqa: BLE001 - not open
-        return None
+    seen: set[str] = set()
+    candidates: list[str] = []
+    for cand in (name, Path(name).name):
+        key = cand.casefold()
+        if cand and key not in seen:
+            seen.add(key)
+            candidates.append(cand)
+
+    for cand in candidates:
+        try:
+            wb = workbook_or_none(app.Workbooks.Item(cand))
+            if wb is not None:
+                return wb
+        except Exception:  # noqa: BLE001 - not open
+            pass
+        try:
+            wb = workbook_or_none(app.Workbooks(cand))
+            if wb is not None:
+                return wb
+        except Exception:  # noqa: BLE001 - not open
+            pass
+    return None
 
 
 def find_workbook(app: Any, target: Path) -> Any | None:
-    """Locate an open workbook/add-in by full path."""
+    """Locate an open workbook/add-in by full path, then by file name.
+
+    Installed add-ins are hidden from ``Workbooks`` iteration. They are also
+    often loaded from a different folder than the repo target (Excel's AddIns
+    directory, a mapped share, a previous copy). Live inject has to hit the
+    loaded project, so a same-filename add-in is accepted when the paths
+    differ.
+    """
+    target = Path(target)
     for wb in iter_workbooks(app):
         try:
             full = wb.FullName
@@ -324,14 +379,18 @@ def find_workbook(app: Any, target: Path) -> Any | None:
         if same_path(full, target):
             return wb
 
-    # Add-ins are hidden from iteration; resolve by name and confirm the path.
-    wb = lookup_workbook(app, Path(target).name)
-    if wb is not None:
-        try:
-            if same_path(wb.FullName, target):
-                return wb
-        except Exception:  # noqa: BLE001
-            return None
+    wb = lookup_workbook(app, target.name)
+    if wb is None:
+        return None
+    try:
+        if same_path(wb.FullName, target):
+            return wb
+    except Exception:  # noqa: BLE001 - FullName unreadable
+        if is_addin_path(target):
+            return wb
+        return None
+    if is_addin_path(target):
+        return wb
     return None
 
 
@@ -358,6 +417,8 @@ def find_host(path: Path) -> Any | None:
     for app in all_excel_instances():
         try:
             if find_workbook(app, path) is not None:
+                return app
+            if is_addin_path(path) and find_workbook_by_name(app, path.name) is not None:
                 return app
         except Exception:  # noqa: BLE001 - instance died mid-scan
             continue
@@ -389,7 +450,7 @@ def get_excel_for(
     raise ExcelNotRunningError(
         "No running Excel instance found.",
         "Open Excel (with your workbook or add-in loaded) and retry, or pass "
-        "--launch to let xlvba start Excel itself.",
+        "--launch to let xlvbesync start Excel itself.",
     )
 
 
@@ -400,21 +461,51 @@ def open_workbook(app: Any, path: Path, *, read_only: bool = False) -> Any:
     ``AddToMru=False`` keeps the user's recent-files list clean;
     ``UpdateLinks=0`` and ``CorruptLoad`` defaults avoid prompts.
     """
-    return app.Workbooks.Open(
-        str(path),
-        UpdateLinks=0,
-        ReadOnly=read_only,
-        AddToMru=False,
-        Notify=False,
+    return workbook_or_none(
+        app.Workbooks.Open(
+            str(path),
+            UpdateLinks=0,
+            ReadOnly=read_only,
+            AddToMru=False,
+            Notify=False,
+        )
     )
 
 
 def ensure_workbook(app: Any, path: Path, *, read_only: bool = False) -> tuple[Any, bool]:
-    """Return ``(workbook, opened_by_us)`` for ``path``."""
+    """Return ``(workbook, opened_by_us)`` for ``path``.
+
+    Opening an already-loaded add-in often returns Empty instead of the
+    Workbook, so we fall back to a by-name lookup (and, for add-ins, a
+    forced AddIns install) rather than handing ``None`` to ``VBProject``.
+    """
     existing = find_workbook(app, path)
     if existing is not None:
         return existing, False
-    return open_workbook(app, path, read_only=read_only), True
+
+    if is_addin_path(path):
+        from xlvbesync.core.addin import force_install
+
+        if force_install(app, path):
+            existing = find_workbook(app, path) or find_workbook_by_name(
+                app, path.name
+            )
+            if existing is not None:
+                return existing, False
+
+    opened = open_workbook(app, path, read_only=read_only)
+    if opened is not None:
+        return opened, True
+
+    existing = find_workbook(app, path) or find_workbook_by_name(app, path.name)
+    if existing is not None:
+        return existing, False
+
+    raise TargetNotOpenError(
+        f"Excel did not open {path.name}.",
+        "If this is an add-in, enable it under File > Options > Add-ins "
+        "(or open the .xlam as a workbook), then retry.",
+    )
 
 
 def is_vbe_busy(app: Any) -> bool:

@@ -19,8 +19,8 @@ import contextlib
 from dataclasses import dataclass
 from pathlib import Path
 
-from xlvba.core import console
-from xlvba.core.addin import (
+from xlvbesync.core import console
+from xlvbesync.core.addin import (
     discard_backup,
     ensure_addin_entry,
     find_addin,
@@ -30,12 +30,13 @@ from xlvba.core.addin import (
     settle,
     unload_addin,
 )
-from xlvba.core.config import MODE_LIVE, MODE_SWAP, ProjectConfig, TargetConfig
-from xlvba.core.errors import TargetNotFoundError, XlvbaError
-from xlvba.core.excel import get_excel_for, quiet_excel
-from xlvba.core.state import SyncState
-from xlvba.ops.inject import InjectReport, inject_target, print_report
-from xlvba.ops.session import open_target
+from xlvbesync.core.config import MODE_LIVE, MODE_SWAP, ProjectConfig, TargetConfig
+from xlvbesync.core.customui import find_customui_dir, sync_customui
+from xlvbesync.core.errors import TargetNotFoundError, XlvbesyncError
+from xlvbesync.core.excel import get_excel_for, quiet_excel, same_path
+from xlvbesync.core.state import SyncState
+from xlvbesync.ops.inject import InjectReport, inject_target, print_report
+from xlvbesync.ops.session import open_target
 
 
 @dataclass
@@ -110,13 +111,13 @@ def reload_swap(
     app, started = get_excel_for(path, launch=config.launch_excel)
 
     # Keep the real extension last: Excel refuses to open a file whose
-    # extension it does not recognise, so "Demo.xlvba-stage.xlam" works while
-    # "Demo.xlam.xlvba-stage" is fragile.
-    staged = path.with_name(f"{path.stem}.xlvba-stage{path.suffix}")
+    # extension it does not recognise, so "Demo.xlvbesync-stage.xlam" works while
+    # "Demo.xlam.xlvbesync-stage" is fragile.
+    staged = path.with_name(f"{path.stem}.xlvbesync-stage{path.suffix}")
     with contextlib.suppress(OSError):
         staged.unlink()
 
-    backup: Path | None = None
+    backups: list[tuple[Path, Path | None]] = []
     hosts: list = []
 
     try:
@@ -149,10 +150,15 @@ def reload_swap(
                 )
 
             if not report.inject.ok:
-                raise XlvbaError(
+                raise XlvbesyncError(
                     f"Injection into the staged copy of {path.name} failed; "
                     "the live add-in was left untouched."
                 )
+
+            # Sync customUI files (Ribbon XML and images) into the staged copy
+            customui_dir = find_customui_dir(config.target_dir(target))
+            if customui_dir is not None:
+                sync_customui(staged, customui_dir)
 
             settle()
 
@@ -161,7 +167,17 @@ def reload_swap(
             settle()
 
             # --- 4. Replace on disk --------------------------------------
-            backup = replace_file(staged, path)
+            # Replace the repo target file and any instance's installed add-in
+            # path (e.g. %AppData%\Microsoft\AddIns\name.xlam).
+            destinations: list[Path] = [path]
+            for _, handle in hosts:
+                if handle is not None and handle.path is not None:
+                    if not any(same_path(handle.path, d) for d in destinations):
+                        destinations.append(handle.path)
+
+            for dest in destinations:
+                bak = replace_file(staged, dest)
+                backups.append((dest, bak))
 
             # --- 5. Reload everywhere it was installed -------------------
             restored = reload_hosts(path, hosts)
@@ -169,16 +185,18 @@ def reload_swap(
             if restored > 1:
                 report.note = f"re-enabled in {restored} Excel instances"
 
-        discard_backup(backup)
-        backup = None
+        for _, bak in backups:
+            discard_backup(bak)
+        backups.clear()
 
     except Exception:
         # Best effort: get the user's add-in back into a working state.
-        if backup is not None and backup.is_file():
-            with contextlib.suppress(Exception):
-                import shutil
+        import shutil
 
-                shutil.copy2(backup, path)
+        for dest, bak in backups:
+            if bak is not None and bak.is_file():
+                with contextlib.suppress(Exception):
+                    shutil.copy2(bak, dest)
         if hosts:
             with contextlib.suppress(Exception):
                 reload_hosts(path, hosts)
@@ -203,7 +221,18 @@ def reload_target(
     force: bool = False,
 ) -> ReloadReport:
     """Reload ``target`` using the requested (or configured) mode."""
+    target_path = config.target_path(target)
     chosen = mode or target.mode
+
+    # If the user did not explicitly request live mode and this add-in has
+    # customUI, it cannot be injected live so swap mode is required.
+    if (
+        mode is None
+        and is_addin(target_path)
+        and find_customui_dir(config.target_dir(target)) is not None
+    ):
+        chosen = MODE_SWAP
+
     if chosen == MODE_SWAP:
         return reload_swap(config, target, state=state, only=only, force=force)
     return reload_live(config, target, state=state, only=only, force=force)

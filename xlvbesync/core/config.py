@@ -1,6 +1,6 @@
-"""Project configuration (``xlvba.json``).
+"""Project configuration (``xlvbesync.json``).
 
-A project file lets you run bare ``xlvba extract`` / ``xlvba watch`` with no
+A project file lets you run bare ``xlvbesync extract`` / ``xlvbesync watch`` with no
 arguments. Every field can still be overridden per invocation on the CLI.
 """
 
@@ -11,10 +11,10 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any
 
-from xlvba.core.codec import DEFAULT_ANSI_ENCODING
-from xlvba.core.errors import ConfigError
+from xlvbesync.core.codec import DEFAULT_ANSI_ENCODING
+from xlvbesync.core.errors import ConfigError
 
-CONFIG_FILENAME = "xlvba.json"
+CONFIG_FILENAME = "xlvbesync.json"
 
 #: Injection strategies.
 MODE_LIVE = "live"
@@ -23,6 +23,7 @@ VALID_MODES = (MODE_LIVE, MODE_SWAP)
 
 DEFAULT_SRC_DIR = "src"
 DEFAULT_DEBOUNCE_MS = 250
+DEFAULT_INDENT = "    "
 
 DEFAULT_IGNORE = (
     ".git/**",
@@ -32,6 +33,41 @@ DEFAULT_IGNORE = (
     "**/~$*",
     "**/*.tmp",
 )
+
+
+def parse_indent(value: Any) -> str:
+    """Turn an ``xlvbesync.json`` ``indent`` value into the indent unit string."""
+    if value is None:
+        return DEFAULT_INDENT
+    if isinstance(value, bool):
+        raise ConfigError(
+            "'indent' must be \"tab\", a string of spaces, or a number of spaces."
+        )
+    if isinstance(value, int):
+        if value < 0:
+            raise ConfigError("'indent' must be >= 0.")
+        return " " * value
+    s = str(value)
+    lowered = s.casefold()
+    if lowered in ("tab", "tabs") or s in ("\t", "\\t"):
+        return "\t"
+    if lowered in ("space", "spaces"):
+        return DEFAULT_INDENT
+    if s.isdigit():
+        return " " * int(s)
+    if s != "" and all(ch == " " for ch in s):
+        return s
+    raise ConfigError(
+        f"Invalid indent {value!r}.",
+        'Use "tab", a string of spaces, or a number of spaces.',
+    )
+
+
+def indent_for_json(indent: str) -> str:
+    """Serialise an indent unit for ``xlvbesync.json``."""
+    if indent == "\t":
+        return "tab"
+    return indent
 
 
 @dataclass
@@ -92,7 +128,7 @@ class TargetConfig:
 
 @dataclass
 class ProjectConfig:
-    """Top-level ``xlvba.json`` contents."""
+    """Top-level ``xlvbesync.json`` contents."""
 
     root: Path
     src_dir: str = DEFAULT_SRC_DIR
@@ -108,8 +144,11 @@ class ProjectConfig:
     #: Off by default: an accidental file deletion should not nuke live code.
     sync_deletions: bool = False
 
-    #: Pretty-print and rewrite UTF-8/CRLF when ``xlvba watch`` sees a save.
+    #: Pretty-print and rewrite UTF-8/CRLF when ``xlvbesync watch`` sees a save.
     format_on_save: bool = True
+
+    #: Indent unit for format-on-save. ``"\\t"`` for tabs, or a string of spaces.
+    indent: str = DEFAULT_INDENT
 
     # -- paths ------------------------------------------------------------
 
@@ -231,6 +270,7 @@ class ProjectConfig:
             "launch_excel": self.launch_excel,
             "sync_deletions": self.sync_deletions,
             "format_on_save": self.format_on_save,
+            "indent": indent_for_json(self.indent),
             "ignore": list(self.ignore),
             "targets": [asdict(t) for t in self.targets],
         }
@@ -272,12 +312,13 @@ class ProjectConfig:
             launch_excel=bool(data.get("launch_excel", False)),
             sync_deletions=bool(data.get("sync_deletions", False)),
             format_on_save=bool(data.get("format_on_save", True)),
+            indent=parse_indent(data["indent"]) if "indent" in data else DEFAULT_INDENT,
         )
         return cfg
 
 
 def find_config_file(start: Path) -> Path | None:
-    """Search ``start`` and its parents for ``xlvba.json``."""
+    """Search ``start`` and its parents for ``xlvbesync.json``."""
     current = start.resolve()
     for candidate in [current, *current.parents]:
         cfg = candidate / CONFIG_FILENAME
@@ -292,7 +333,7 @@ def load_config(path: Path | None = None, *, root: Path | None = None) -> Projec
     if cfg_path is None:
         raise ConfigError(
             f"No {CONFIG_FILENAME} found in this directory or any parent.",
-            "Run `xlvba init --target <file.xlsm>` to create one, or pass "
+            "Run `xlvbesync init --target <file.xlsm>` to create one, or pass "
             "--target explicitly.",
         )
     try:

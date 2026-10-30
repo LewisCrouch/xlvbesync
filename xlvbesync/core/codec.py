@@ -22,7 +22,7 @@ from pathlib import Path
 
 #: The encoding the VBE reads and writes. Technically this is the system ANSI
 #: code page; cp1252 covers Western installs. Override via
-#: ``xlvba.json -> "ansi_encoding"`` if you run a different locale.
+#: ``xlvbesync.json -> "ansi_encoding"`` if you run a different locale.
 DEFAULT_ANSI_ENCODING = "cp1252"
 
 #: Repo-side encoding. Non-negotiable per project requirements.

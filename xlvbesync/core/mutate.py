@@ -20,22 +20,22 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from xlvba.core.codec import (
+from xlvbesync.core.codec import (
     DEFAULT_ANSI_ENCODING,
     encode_ansi,
     ensure_vb_name,
     normalise_newlines,
     strip_attributes,
 )
-from xlvba.core.components import (
+from xlvbesync.core.components import (
     FORM_BINARY_EXT,
     ComponentRef,
     is_document_module,
     validate_vba_name,
 )
-from xlvba.core.errors import XlvbaError, com_description
-from xlvba.core.retry import com_retry
-from xlvba.core.vbproject import find_component, read_code
+from xlvbesync.core.errors import XlvbesyncError, com_description
+from xlvbesync.core.retry import com_retry
+from xlvbesync.core.vbproject import find_component, read_code
 
 
 class InjectionResult:
@@ -176,7 +176,7 @@ def inject_component(
         with contextlib.suppress(Exception):
             backup = read_code(existing)
 
-    with tempfile.TemporaryDirectory(prefix="xlvba-import-") as raw_tmp:
+    with tempfile.TemporaryDirectory(prefix="xlvbesync-import-") as raw_tmp:
         tmpdir = Path(raw_tmp)
         staged, lossy = _stage_ansi(
             text, ref.name, ref.ext, tmpdir, ansi_encoding, frx_source
@@ -194,7 +194,7 @@ def inject_component(
                     restored = project.VBComponents.Add(ref.component_type)
                     restored.Name = ref.name
                     restored.CodeModule.AddFromString(strip_attributes(backup) or backup)
-            raise XlvbaError(
+            raise XlvbesyncError(
                 f"Failed to import {ref.name}{ref.ext}: {com_description(exc)}",
                 "Check the file for VBA syntax errors, and make sure no code "
                 "from this project is currently running.",

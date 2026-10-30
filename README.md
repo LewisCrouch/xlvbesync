@@ -1,11 +1,11 @@
-# xlvba
+# xlvbesync
 
 Edit Excel VBA in VS Code. Extract modules out of `.xlsm` workbooks and `.xlam`
 add-ins, push them back, and hot-reload on save so the running code updates as
 you type - including add-ins, which Excel normally keeps locked.
 
 ```
- VS Code                          xlvba                        Excel
+ VS Code                          xlvbesync                        Excel
  ───────                          ─────                        ─────
  src/MyTools/modUtil.bas  ──save──▶ watcher ──COM──▶ VBProject.VBComponents
                           ◀─extract─                 (live, no restart)
@@ -14,7 +14,7 @@ you type - including add-ins, which Excel normally keeps locked.
 - **Windows only.** It drives Excel through COM (`win32com.client`); there is
   no macOS or Linux equivalent.
 - **Every file on disk is UTF-8.** The VBE reads and writes the legacy ANSI
-  code page, so xlvba transcodes in both directions and tells you when a
+  code page, so xlvbesync transcodes in both directions and tells you when a
   character cannot survive the trip.
 - **Add-ins are first class.** Two reload strategies, both tested against a
   genuinely installed and file-locked `.xlam`.
@@ -30,7 +30,7 @@ you type - including add-ins, which Excel normally keeps locked.
 - [How hot-reload works](#how-hot-reload-works)
 - [Live mode vs swap mode](#live-mode-vs-swap-mode)
 - [Commands](#commands)
-- [Configuration (`xlvba.json`)](#configuration-xlvbajson)
+- [Configuration (`xlvbesync.json`)](#configuration-xlvbesyncjson)
 - [File layout and extensions](#file-layout-and-extensions)
 - [VS Code integration](#vs-code-integration)
 - [Troubleshooting](#troubleshooting)
@@ -47,18 +47,18 @@ you type - including add-ins, which Excel normally keeps locked.
 | Microsoft Excel | Desktop Excel. Tested on Microsoft 365 (16.0) |
 | Python 3.9+ | Tested on 3.11 |
 | `pywin32` | COM bridge; needs a post-install step |
-| `watchdog` | Only for `xlvba watch` |
+| `watchdog` | Only for `xlvbesync watch` |
 
 ---
 
 ## Install
 
-Install into the Python that is already on your PATH. That registers `xlvba`
+Install into the Python that is already on your PATH. That registers `xlvbesync`
 as a global command, so you can run it from any directory.
 
 ```powershell
-git clone https://github.com/LewisCrouch/xlvba.git
-cd xlvba
+git clone https://github.com/LewisCrouch/xlvbesync.git
+cd xlvbesync
 
 python -m pip install -e .
 
@@ -70,13 +70,13 @@ python "$scripts\pywin32_postinstall.py" -install
 Confirm the command is on PATH and the COM chain works:
 
 ```powershell
-xlvba --version
-xlvba doctor
+xlvbesync --version
+xlvbesync doctor
 ```
 
-The install is editable, so changes under `xlvba/` are live the next time you
+The install is editable, so changes under `xlvbesync/` are live the next time you
 run the command. A project `.venv` is optional if you prefer an isolated
-interpreter; activate it first or `xlvba` will not be on PATH.
+interpreter; activate it first or `xlvbesync` will not be on PATH.
 
 ---
 
@@ -91,7 +91,7 @@ projects by default.
 4. Tick **Trust access to the VBA project object model**
 5. **Restart Excel completely** (check Task Manager for stray `EXCEL.EXE`)
 
-`xlvba doctor` reads the underlying registry value and also performs a live
+`xlvbesync doctor` reads the underlying registry value and also performs a live
 probe against an open workbook:
 
 ```
@@ -111,14 +111,14 @@ Setting it by hand works, but Excel must be restarted afterwards.
 ## Quick start
 
 ```powershell
-# 1. Point xlvba at a workbook or add-in.
-xlvba init --target "C:\work\Reporting.xlsm"
+# 1. Point xlvbesync at a workbook or add-in.
+xlvbesync init --target "C:\work\Reporting.xlsm"
 
 # 2. Pull the existing VBA into src/.
-xlvba extract
+xlvbesync extract
 
 # 3. Start hot-reloading.
-xlvba watch
+xlvbesync watch
 ```
 
 Now open `src/Reporting/modUtil.bas` in VS Code and save. The change is live in
@@ -154,7 +154,7 @@ work happens on one dedicated worker thread that owns its own COM apartment;
 calling Excel from several watchdog threads reliably produces
 *"Call was rejected by callee"*.
 
-**Content hashing.** `.xlvba-state.json` records a hash of what was last
+**Content hashing.** `.xlvbesync-state.json` records a hash of what was last
 pushed. An editor that rewrites a file without changing it costs one hash and
 nothing else, so autosave does not thrash your VBA project.
 
@@ -184,7 +184,7 @@ The full add-in lifecycle, for when you want a genuinely clean reload:
 
 ```mermaid
 flowchart TD
-  A["copy .xlam to Name.xlvba-stage.xlam"] --> B["inject into the staged copy"]
+  A["copy .xlam to Name.xlvbesync-stage.xlam"] --> B["inject into the staged copy"]
   B --> C["save and close staged copy"]
   C --> D["uninstall from EVERY Excel instance"]
   D --> E["poll until the OS handle is released"]
@@ -203,15 +203,22 @@ Two subtleties this handles that naive implementations miss:
    overwrite the very change you just made.
 2. **Every Excel instance.** Excel can run several processes at once, and an
    add-in loaded in instance B keeps the file locked no matter what you do to
-   instance A. xlvba enumerates the Running Object Table, unloads everywhere,
+   instance A. xlvbesync enumerates the Running Object Table, unloads everywhere,
    waits for the handle to actually drop, then restores each instance that had
    it installed.
+3. **Dual location sync.** Add-ins installed via Excel's options live in
+   `%AppData%\Microsoft\AddIns\` while development targets sit in the repo.
+   xlvbesync detects the installed path, updates both copies atomically, and re-enables
+   the add-in without stale code remaining.
+4. **Ribbon & CustomUI sync.** Changes in `src/<target>/customUI/` (Ribbon XML
+   and icons) are packaged directly into the `.xlam`, and changes to customUI
+   trigger an automatic reload so the ribbon updates immediately.
 
-Set the default per target in `xlvba.json`, or override with `--mode`:
+Set the default per target in `xlvbesync.json`, or override with `--mode`:
 
 ```powershell
-xlvba reload --target MyTools --mode swap
-xlvba watch --mode swap
+xlvbesync reload --target MyTools --mode swap
+xlvbesync watch --mode swap
 ```
 
 ---
@@ -223,7 +230,7 @@ Global options available on every subcommand:
 | Option | Meaning |
 |---|---|
 | `--root DIR` | Project root (default: current directory) |
-| `--config FILE` | Path to `xlvba.json` (default: search upwards) |
+| `--config FILE` | Path to `xlvbesync.json` (default: search upwards) |
 | `--target NAME\|FILE` | One configured target, or a path to use ad hoc |
 | `--src-dir DIR` | Override the source root |
 | `--launch` | Start Excel if it is not already running |
@@ -233,10 +240,10 @@ Global options available on every subcommand:
 ### `init`
 
 ```powershell
-xlvba init --target Reporting.xlsm --target MyTools.xlam
+xlvbesync init --target Reporting.xlsm --target MyTools.xlam
 ```
 
-Creates `xlvba.json`. Repeat `--target` for several files. Running it again
+Creates `xlvbesync.json`. Repeat `--target` for several files. Running it again
 appends new targets rather than overwriting; use `--force` to start over.
 
 If two targets share a filename stem (`Book.xlsm` and `Book.xlam` are a common
@@ -245,9 +252,9 @@ pair) the source folders are auto-named `Book-xlsm` and `Book-xlam`.
 ### `extract`
 
 ```powershell
-xlvba extract
-xlvba extract --target MyTools --prune
-xlvba extract --dry-run -v
+xlvbesync extract
+xlvbesync extract --target MyTools --prune
+xlvbesync extract --dry-run -v
 ```
 
 | Option | Meaning |
@@ -264,9 +271,9 @@ copy is injected into the target instead. See
 ### `inject`
 
 ```powershell
-xlvba inject
-xlvba inject --file src/MyTools/modUtil.bas
-xlvba inject --force --no-save
+xlvbesync inject
+xlvbesync inject --file src/MyTools/modUtil.bas
+xlvbesync inject --force --no-save
 ```
 
 | Option | Meaning |
@@ -282,7 +289,7 @@ New files are created automatically; there is no separate "add module" step.
 ### `reload`
 
 ```powershell
-xlvba reload --target MyTools --mode swap
+xlvbesync reload --target MyTools --mode swap
 ```
 
 Inject plus, in swap mode, the full add-in unload/replace/reload cycle.
@@ -290,9 +297,9 @@ Inject plus, in swap mode, the full add-in unload/replace/reload cycle.
 ### `watch`
 
 ```powershell
-xlvba watch
-xlvba watch --target MyTools --mode swap --debounce 400
-xlvba watch --initial-sync
+xlvbesync watch
+xlvbesync watch --target MyTools --mode swap --debounce 400
+xlvbesync watch --initial-sync
 ```
 
 | Option | Meaning |
@@ -305,13 +312,14 @@ xlvba watch --initial-sync
 Stop with Ctrl+C.
 
 When `format_on_save` is true (the default), each save is pretty-printed and
-rewritten as UTF-8 (no BOM) with CRLF endings before it is injected. Set
-`"format_on_save": false` in `xlvba.json` to leave files untouched.
+rewritten as UTF-8 (no BOM) with CRLF endings before it is injected. Indent is
+controlled by `indent` in `xlvbesync.json` (`"tab"`, a string of spaces, or a
+number of spaces). Set `"format_on_save": false` to leave files untouched.
 
 ### `list`
 
 ```powershell
-xlvba list
+xlvbesync list
 ```
 
 Shows both sides at once, including files that exist only locally:
@@ -329,10 +337,20 @@ ThisWorkbook.dcm  document module  5      yes    ThisWorkbook
 modBrandNew.bas   local only       -      yes    will be created
 ```
 
+### `format`
+
+```powershell
+xlvbesync format
+xlvbesync format --target MyTools
+```
+
+Pretty-print every local source file for the selected targets using `indent`
+from `xlvbesync.json`. Does not talk to Excel.
+
 ### `doctor`
 
 ```powershell
-xlvba doctor
+xlvbesync doctor
 ```
 
 Checks platform, `pywin32`, `watchdog`, encoding, the `AccessVBOM` registry
@@ -342,10 +360,10 @@ works in CI or a pre-commit hook.
 
 ---
 
-## Configuration (`xlvba.json`)
+## Configuration (`xlvbesync.json`)
 
 Created by `init`, searched for upwards from the current directory. See
-[`xlvba.example.json`](xlvba.example.json).
+[`xlvbesync.example.json`](xlvbesync.example.json).
 
 ```json
 {
@@ -355,6 +373,7 @@ Created by `init`, searched for upwards from the current directory. See
   "launch_excel": false,
   "sync_deletions": false,
   "format_on_save": true,
+  "indent": "tab",
   "ignore": ["**/*.frx", "**/~$*"],
   "targets": [
     {
@@ -377,6 +396,7 @@ Created by `init`, searched for upwards from the current directory. See
 | `launch_excel` | `false` | Start Excel automatically when it is not running |
 | `sync_deletions` | `false` | Deleting a local file removes the component |
 | `format_on_save` | `true` | Watch pretty-prints and rewrites UTF-8/CRLF on save |
+| `indent` | `"    "` (4 spaces) | Indent unit: `"tab"`, a string of spaces, or a number of spaces |
 | `ignore` | see example | Glob patterns excluded from watching and injection |
 
 Per target:
@@ -430,7 +450,7 @@ Details worth knowing:
   folder, the target's own copy wins - a local override.
 - `exclude` still matches by component name, so it can drop a shared module
   from one target.
-- `xlvba list` marks shared modules with `shared: <folder>` in its notes
+- `xlvbesync list` marks shared modules with `shared: <folder>` in its notes
   column.
 
 #### The repo's shared copy is authoritative
@@ -440,7 +460,7 @@ own folder would silently create a local override and quietly fork the library,
 so `extract` does the opposite:
 
 ```powershell
-xlvba extract --target Reporting
+xlvbesync extract --target Reporting
 ```
 
 - Shared components are **not** written to `src/Reporting/`. They are reported
@@ -455,7 +475,7 @@ When Excel really does hold the newer version - you edited the module in the
 VBE - ask for it explicitly:
 
 ```powershell
-xlvba extract --target Reporting --extract-shared
+xlvbesync extract --target Reporting --extract-shared
 ```
 
 That writes each shared component back over its file **in the shared folder it
@@ -465,10 +485,10 @@ edit then propagates to every other target on the next inject or save.
 ### Ad-hoc use without a config
 
 ```powershell
-xlvba extract --target "C:\work\Reporting.xlsm" --src-dir vba
+xlvbesync extract --target "C:\work\Reporting.xlsm" --src-dir vba
 ```
 
-Passing a file path to `--target` skips `xlvba.json` entirely.
+Passing a file path to `--target` skips `xlvbesync.json` entirely.
 
 ---
 
@@ -476,8 +496,8 @@ Passing a file path to `--target` skips `xlvba.json` entirely.
 
 ```
 your-project/
-├─ xlvba.json
-├─ .xlvba-state.json        generated; safe to delete
+├─ xlvbesync.json
+├─ .xlvbesync-state.json        generated; safe to delete
 └─ src/
    ├─ shared/               shared library (opt-in via "include")
    │  └─ modCommon.bas
@@ -489,7 +509,13 @@ your-project/
    │  ├─ Sheet1.dcm         sheet code module
    │  └─ ThisWorkbook.dcm   workbook code module
    └─ MyTools/
-      └─ modAddin.bas
+      ├─ modAddin.bas
+      └─ customUI/          Ribbon XML and icons (synced into .xlam on reload)
+         ├─ customUI14.xml
+         ├─ _rels/
+         │  └─ customUI14.xml.rels
+         └─ images/
+            └─ icon.png
 ```
 
 | Extension | VBComponent type | Sync method |
@@ -557,13 +583,13 @@ will sync half-typed lines. `onFocusChange` works well.
 
 The Trust Center setting is off, or Excel was not restarted after enabling it.
 See [the setup section](#enable-trust-access-to-the-vba-project-object-model).
-Run `xlvba doctor` to confirm. Note the setting is **per Office version** and
+Run `xlvbesync doctor` to confirm. Note the setting is **per Office version** and
 per user.
 
 ### "Call was rejected by callee" (`0x80010001`)
 
 Excel was busy - mid-recalculation, a modal dialog was open, or a cell was
-being edited. xlvba retries with exponential backoff (~4 s total) and only then
+being edited. xlvbesync retries with exponential backoff (~4 s total) and only then
 gives up. If you see it repeatedly, something is genuinely blocking Excel:
 close open dialogs and press Escape to leave cell-edit mode.
 
@@ -589,13 +615,13 @@ unlocked.
 
 ### Changes do not appear in Excel
 
-- Confirm the target is actually open: `xlvba list` shows `not open` per target
+- Confirm the target is actually open: `xlvbesync list` shows `not open` per target
   in `doctor` output.
 - With several Excel instances running, make sure the workbook is open in one
-  of them. xlvba prefers the instance that already hosts the file, but it
+  of them. xlvbesync prefers the instance that already hosts the file, but it
   cannot inject into a file nobody has open unless it opens it itself.
 - Check the file is under the configured `src_dir` and matches a target folder.
-- Delete `.xlvba-state.json` and retry with `--force` if you suspect a stale
+- Delete `.xlvbesync-state.json` and retry with `--force` if you suspect a stale
   hash.
 
 ### Non-ASCII characters became `?`
@@ -606,14 +632,14 @@ WARN modUtil: 2 character(s) are not representable in cp1252 and were
 ```
 
 The VBE stores code in the ANSI code page, which cannot hold emoji or CJK. This
-is a hard VBA limitation, not an xlvba one. Keep such text in worksheet cells
+is a hard VBA limitation, not an xlvbesync one. Keep such text in worksheet cells
 or an external resource file rather than string literals. Accented Latin
 characters (`é`, `ü`, `€`) round-trip fine.
 
 ### `ModuleNotFoundError: No module named 'win32com'`
 
 Dependencies were installed into a different interpreter than the one that
-runs `xlvba`. Reinstall with the same `python` that is on PATH:
+runs `xlvbesync`. Reinstall with the same `python` that is on PATH:
 
 ```powershell
 python -m pip install -e .
@@ -624,7 +650,7 @@ python "$scripts\pywin32_postinstall.py" -install
 ### A userform lost its controls
 
 The `.frx` was missing when the `.frm` was injected. Both files must sit side
-by side. Recover with `xlvba extract --force` from a good copy of the workbook.
+by side. Recover with `xlvbesync extract --force` from a good copy of the workbook.
 
 ### The watcher is not reacting
 
@@ -638,7 +664,7 @@ by side. Recover with `xlvba extract --force` from a good copy of the workbook.
 
 - **Windows and desktop Excel only.**
 - **Password-protected VBA projects cannot be touched.** Unlock via
-  *Tools > VBAProject Properties > Protection* first; xlvba detects this and
+  *Tools > VBAProject Properties > Protection* first; xlvbesync detects this and
   says so rather than failing obscurely.
 - **Document modules cannot be created or deleted**, only edited. A `.dcm`
   file with no matching sheet is reported as skipped.
@@ -647,7 +673,7 @@ by side. Recover with `xlvba extract --force` from a good copy of the workbook.
 - **Injecting while code is running or the VBE is in break mode will fail.**
   Stop execution first.
 - **No conflict detection.** If you edit in the VBE *and* in VS Code, the next
-  sync overwrites the VBE side. Run `xlvba extract` first to pull VBE changes
+  sync overwrites the VBE side. Run `xlvbesync extract` first to pull VBE changes
   down.
 
 ---
@@ -658,31 +684,31 @@ by side. Recover with `xlvba extract --force` from a good copy of the workbook.
 python -m pip install -e .
 ```
 
-That is the same editable install used in [Install](#install). `xlvba` then
+That is the same editable install used in [Install](#install). `xlvbesync` then
 picks up local source changes without a reinstall.
 
 Source layout:
 
 | Module | Responsibility |
 |---|---|
-| `xlvba/cli.py` | Argument parsing |
-| `xlvba/commands.py` | One handler per subcommand |
-| `xlvba/watch.py` | Debounced watcher + single-flight COM worker |
-| `xlvba/ops/session.py` | Target session context manager and workbook binding |
-| `xlvba/ops/extract.py` | Export components to disk (with shared library handling) |
-| `xlvba/ops/inject.py` | Source discovery and component injection |
-| `xlvba/ops/reload.py` | Live / swap reload orchestration |
-| `xlvba/core/excel.py` | COM attach, ROT enumeration, prompt suppression |
-| `xlvba/core/addin.py` | `.xlam` lifecycle, lock probing, atomic replace |
-| `xlvba/core/vbproject.py` | Enumerate and export components |
-| `xlvba/core/mutate.py` | Import, replace, create, remove (with rollback) |
-| `xlvba/core/codec.py` | UTF-8 <-> ANSI bridge, VBE header parsing |
-| `xlvba/core/format.py` | Watch format-on-save (indent, keyword case, CRLF) |
-| `xlvba/core/config.py` | `xlvba.json` loading, target resolution, and validation |
-| `xlvba/core/state.py` | Content-hash cache |
-| `xlvba/core/errors.py` | HRESULT decoding, actionable exceptions |
+| `xlvbesync/cli.py` | Argument parsing |
+| `xlvbesync/commands.py` | One handler per subcommand |
+| `xlvbesync/watch.py` | Debounced watcher + single-flight COM worker |
+| `xlvbesync/ops/session.py` | Target session context manager and workbook binding |
+| `xlvbesync/ops/extract.py` | Export components to disk (with shared library handling) |
+| `xlvbesync/ops/inject.py` | Source discovery and component injection |
+| `xlvbesync/ops/reload.py` | Live / swap reload orchestration |
+| `xlvbesync/core/excel.py` | COM attach, ROT enumeration, prompt suppression |
+| `xlvbesync/core/addin.py` | `.xlam` lifecycle, lock probing, atomic replace |
+| `xlvbesync/core/vbproject.py` | Enumerate and export components |
+| `xlvbesync/core/mutate.py` | Import, replace, create, remove (with rollback) |
+| `xlvbesync/core/codec.py` | UTF-8 <-> ANSI bridge, VBE header parsing |
+| `xlvbesync/core/format.py` | Watch format-on-save (indent, keyword case, CRLF). `xlvbesync format` applies the same rules to every source file. |
+| `xlvbesync/core/config.py` | `xlvbesync.json` loading, target resolution, and validation |
+| `xlvbesync/core/state.py` | Content-hash cache |
+| `xlvbesync/core/errors.py` | HRESULT decoding, actionable exceptions |
 
-`xlvba.json` and `src/` are gitignored here because this repo ships the tool,
+`xlvbesync.json` and `src/` are gitignored here because this repo ships the tool,
 not anyone's VBA. If you want to use it to version your own macros, delete
 those two lines from `.gitignore`.
 

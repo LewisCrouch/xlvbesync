@@ -95,9 +95,9 @@ def heading(message: str) -> None:
 
 def describe_exception(exc: BaseException) -> str:
     """Render an exception for the console, including any remedy."""
-    from xlvba.core.errors import XlvbaError, com_description, hresult_of
+    from xlvbesync.core.errors import XlvbesyncError, com_description, hresult_of
 
-    if isinstance(exc, XlvbaError):
+    if isinstance(exc, XlvbesyncError):
         return str(exc)
 
     hres = hresult_of(exc)
