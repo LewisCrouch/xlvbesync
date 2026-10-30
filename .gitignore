@@ -14,6 +14,7 @@ dist/
 # ---- xlvbesync runtime state ----
 .xlvbesync-state.json
 *.xlvbesync.log
+scripts/xlvbesync-capability-report.txt
 
 # ---- Excel lock / owner files ----
 # Created by Excel while a workbook or add-in is open.
